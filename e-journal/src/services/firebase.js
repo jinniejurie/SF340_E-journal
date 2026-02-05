@@ -19,10 +19,40 @@ const firebaseConfig = {
   measurementId: import.meta.env.VITE_MEASUREMENT_ID
 };
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-const analytics = getAnalytics(app);
+// Guarded initialization: avoid throwing when environment variables are missing
+// Required minimal values for many Firebase features are apiKey, projectId and appId.
+const hasMinimalConfig = Boolean(
+  firebaseConfig.apiKey && firebaseConfig.projectId && firebaseConfig.appId
+);
 
-export const auth = getAuth(app);
-export const db = getFirestore(app);
-export const storage = getStorage(app);
+let app = null;
+let analytics = null;
+
+if (hasMinimalConfig) {
+  try {
+    app = initializeApp(firebaseConfig);
+    try {
+      // analytics can fail in some environments (SSR, missing browser APIs)
+      analytics = getAnalytics(app);
+    } catch (e) {
+      // Don't block the app if analytics can't initialize
+      // eslint-disable-next-line no-console
+      console.warn('Firebase analytics not available:', e?.message || e);
+    }
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error('Failed to initialize Firebase app:', e?.message || e);
+    app = null;
+  }
+} else {
+  // eslint-disable-next-line no-console
+  console.warn(
+    'Firebase configuration incomplete. Skipping initialization.\n' +
+      'Create a .env file with VITE_API_KEY, VITE_AUTH_DOMAIN, VITE_PROJECT_ID, VITE_APP_ID, etc.,\n' +
+      'then restart the dev server.'
+  );
+}
+
+export const auth = app ? getAuth(app) : null;
+export const db = app ? getFirestore(app) : null;
+export const storage = app ? getStorage(app) : null;
