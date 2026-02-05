@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
+import { collection, onSnapshot } from 'firebase/firestore'
+import { db } from '../services/firebase'
 import { useNavigate } from 'react-router-dom'
 import '../styles/Calendar.css' 
 
@@ -25,7 +27,19 @@ function Calendar() {
   const [currentDate, setCurrentDate] = useState(today)
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [isThemePickerOpen, setIsThemePickerOpen] = useState(false)
+  const [selectedDay, setSelectedDay] = useState(null)
+  const [showDayModal, setShowDayModal] = useState(false)
+  const [selectedEmotion, setSelectedEmotion] = useState(null)
+  const [showNoteCreation, setShowNoteCreation] = useState(false)
+  const [noteType, setNoteType] = useState('') // 'todo' or 'note'
+  const [noteName, setNoteName] = useState('')
+  const [selectedTag, setSelectedTag] = useState(null)
+  const [showNewTagForm, setShowNewTagForm] = useState(false)
+  const [newTagName, setNewTagName] = useState('')
+  const [newTagColor, setNewTagColor] = useState('#FF6B6B')
+  
   const navigate = useNavigate()
+  
   const [color1, setColor1] = useState(() => {
     try {
       const stored = localStorage.getItem('ejournal-theme')
@@ -48,6 +62,36 @@ function Calendar() {
     } catch (e) {}
     return '#6e5a5a'
   })
+
+  // Tags library state
+  const [tags, setTags] = useState(() => {
+    try {
+      const stored = localStorage.getItem('ejournal-tags')
+      if (stored) return JSON.parse(stored)
+    } catch (e) {}
+    return [
+      { id: 'l01', name: 'Work', color: '#4ECDC4' },
+      { id: 'l02', name: 'Goals', color: '#F38181' },
+      { id: 'l03', name: 'Ideas', color: '#ffe27a' }
+    ]
+  })
+
+  // Notes storage
+  const [notes, setNotes] = useState(() => {
+    try {
+      const stored = localStorage.getItem('ejournal-notes')
+      if (stored) return JSON.parse(stored)
+    } catch (e) {}
+    return {}
+  })
+
+  const [emotions, setEmotions] = useState([
+    { id: 'm01', emoji: '😠', label: 'Angry' },
+    { id: 'm02', emoji: '😢', label: 'Sad' },
+    { id: 'm03', emoji: '😌', label: 'Calm' },
+    { id: 'm04', emoji: '😊', label: 'Happy' },
+    { id: 'm05', emoji: '🤩', label: 'Excited' }
+  ])
 
   const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
     'July', 'August', 'September', 'October', 'November', 'December']
@@ -127,6 +171,68 @@ function Calendar() {
     }
   }, [color1, color2, color3])
 
+  useEffect(() => {
+    try {
+      localStorage.setItem('ejournal-tags', JSON.stringify(tags))
+    } catch (e) {}
+  }, [tags])
+
+  // Sync LABEL and MOOD from Firestore (if available)
+  useEffect(() => {
+    if (!db) {
+      // Firestore not initialized (missing env). App still works with local data.
+      console.warn('Firestore not initialized; skipping LABEL and MOOD sync.')
+      return
+    }
+
+    const unsubLabels = onSnapshot(collection(db, 'LABEL'), snap => {
+      setTags(
+        snap.docs.map(d => {
+          const data = d.data()
+          return {
+            id: d.id,
+            name: data.name || data.labID || '',
+            color: data.color || '#999'
+          }
+        })
+      )
+    }, err => console.error('LABEL onSnapshot error', err))
+
+    const moodEmojiMap = {
+      Angry: '😠',
+      Sad: '😢',
+      Calm: '😌',
+      Happy: '😊',
+      Excited: '🤩',
+      Exited: '🤩'
+    }
+
+    const unsubMoods = onSnapshot(collection(db, 'MOOD'), snap => {
+      setEmotions(
+        snap.docs.map(d => {
+          const data = d.data()
+          const name = data.moodName || data.mood || data.name || ''
+          return {
+            id: d.id,
+            label: name,
+            emoji: moodEmojiMap[name] || ''
+          }
+        })
+      )
+    }, err => console.error('MOOD onSnapshot error', err))
+
+    return () => {
+      try { unsubLabels() } catch (e) {}
+      try { unsubMoods() } catch (e) {}
+    }
+  }, [])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('ejournal-notes', JSON.stringify(notes))
+    } catch (e) {}
+  }, [notes])
+
   const toggleSidebar = () => {
     setIsSidebarOpen((prev) => !prev)
   }
@@ -145,6 +251,122 @@ function Calendar() {
 
   const handleColor3Change = (event) => {
     setColor3(event.target.value)
+  }
+
+  const handleDayClick = (day) => {
+    if (day) {
+      setSelectedDay(day)
+      setShowDayModal(true)
+      setSelectedEmotion(null)
+      setShowNoteCreation(false)
+      setNoteType('')
+    }
+  }
+
+  const closeDayModal = () => {
+    setShowDayModal(false)
+    setSelectedDay(null)
+    setShowNoteCreation(false)
+    setNoteType('')
+    setNoteName('')
+    setSelectedTag(null)
+    setShowNewTagForm(false)
+    setNewTagName('')
+    setNewTagColor('#FF6B6B')
+  }
+
+  const handleCreateNote = () => {
+    setShowNoteCreation(true)
+  }
+
+  const handleNoteTypeSelect = (type) => {
+    setNoteType(type)
+    setNoteName('')
+    setSelectedTag(null)
+  }
+
+  const handleBackFromNoteCreation = () => {
+    setShowNoteCreation(false)
+    setNoteType('')
+    setNoteName('')
+    setSelectedTag(null)
+    setShowNewTagForm(false)
+  }
+
+  const handleSaveNote = () => {
+    if (noteType === 'note' && noteName.trim() && selectedTag) {
+      const dateKey = `${currentYear}-${currentDate.getMonth() + 1}-${selectedDay}`
+      const selectedTagObj = tags.find(t => t.id === selectedTag)
+      const newNote = {
+        id: Date.now(),
+        type: 'note',
+        name: noteName,
+        tag: selectedTagObj,
+        emotion: selectedEmotion,
+        date: dateKey,
+        createdAt: new Date().toISOString()
+      }
+      
+      setNotes(prev => ({
+        ...prev,
+        [dateKey]: [...(prev[dateKey] || []), newNote]
+      }))
+      
+      closeDayModal()
+    } else if (noteType === 'todo' && noteName.trim()) {
+      const dateKey = `${currentYear}-${currentDate.getMonth() + 1}-${selectedDay}`
+      const newTodo = {
+        id: Date.now(),
+        type: 'todo',
+        name: noteName,
+        color: '#000000', // Black color for todo
+        emotion: selectedEmotion,
+        date: dateKey,
+        completed: false,
+        createdAt: new Date().toISOString()
+      }
+      
+      setNotes(prev => ({
+        ...prev,
+        [dateKey]: [...(prev[dateKey] || []), newTodo]
+      }))
+      
+      closeDayModal()
+    }
+  }
+
+  const handleCreateNewTag = () => {
+    if (newTagName.trim()) {
+      const newTag = {
+        id: Date.now(),
+        name: newTagName,
+        color: newTagColor
+      }
+      setTags(prev => [...prev, newTag])
+      setSelectedTag(newTag.id)
+      setShowNewTagForm(false)
+      setNewTagName('')
+      setNewTagColor('#FF6B6B')
+    }
+  }
+
+  const getDayKey = (day) => {
+    return `${currentYear}-${currentDate.getMonth() + 1}-${day}`
+  }
+
+  const getDayNotes = (day) => {
+    if (!day) return []
+    const dateKey = getDayKey(day)
+    return notes[dateKey] || []
+  }
+
+  const canSaveNote = () => {
+    if (noteType === 'todo') {
+      return noteName.trim() !== ''
+    } else if (noteType === 'note') {
+      return noteName.trim() !== '' && selectedTag !== null
+    }
+    return false
   }
 
   return (
@@ -293,26 +515,253 @@ function Calendar() {
           </div>
         ))}
         
-      {days.map((day, index) => (
-        <div
-          key={index}
-          className="calendar-day-cell"
-        >
-          {day && (
-            isToday(day) ? (
-              <div className="calendar-day-highlight">
-                <svg width="35" height="35" viewBox="0 0 35 35" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <circle cx="17.5" cy="17.5" r="17.5" fill="var(--calendar-today-circle)" />
-                </svg>
-                <span className="calendar-day-number-highlight">{day}</span>
-              </div>
-            ) : (
-              <span className="calendar-day-number">{day}</span>
-            )
-          )}
-        </div>
-      ))}
+        {days.map((day, index) => (
+          <div
+            key={index}
+            className="calendar-day-cell"
+            onClick={() => handleDayClick(day)}
+            style={{ cursor: day ? 'pointer' : 'default' }}
+          >
+            {day && (
+              <>
+                {isToday(day) ? (
+                  <div className="calendar-day-highlight">
+                    <svg width="35" height="35" viewBox="0 0 35 35" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <circle cx="17.5" cy="17.5" r="17.5" fill="var(--calendar-today-circle)" />
+                    </svg>
+                    <span className="calendar-day-number-highlight">{day}</span>
+                  </div>
+                ) : (
+                  <span className="calendar-day-number">{day}</span>
+                )}
+                
+                {/* Note indicators */}
+                {getDayNotes(day).length > 0 && (
+                  <div className="calendar-note-indicators">
+                    {getDayNotes(day).slice(0, 4).map((note) => (
+                      <div
+                        key={note.id}
+                        className="calendar-note-dot"
+                        style={{ 
+                          backgroundColor: note.type === 'todo' ? note.color : note.tag.color 
+                        }}
+                      />
+                    ))}
+                    {getDayNotes(day).length > 4 && (
+                      <span className="calendar-note-more">+{getDayNotes(day).length - 4}</span>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        ))}
       </div>
+
+      {/* Day Modal */}
+      {showDayModal && (
+        <div className="modal-overlay" onClick={closeDayModal}>
+          <div className="day-modal" onClick={(e) => e.stopPropagation()}>
+            <button className="modal-close-btn" onClick={closeDayModal} aria-label="Close">
+              ✕
+            </button>
+            
+            {!showNoteCreation ? (
+              <>
+                <div className="modal-header">
+                  <h3 className="modal-date">
+                    {monthNames[currentDate.getMonth()]} {selectedDay}, {currentYear}
+                  </h3>
+                </div>
+
+                {/* Emotion Selector */}
+                <div className="emotion-selector">
+                  {emotions.map(emotion => (
+                    <button
+                      key={emotion.id}
+                      className={`emotion-btn ${selectedEmotion === emotion.id ? 'emotion-btn--selected' : ''}`}
+                      onClick={() => setSelectedEmotion(emotion.id)}
+                      aria-label={emotion.label}
+                      title={emotion.label}
+                    >
+                      <span className="emotion-emoji">{emotion.emoji}</span>
+                    </button>
+                  ))}
+                </div>
+
+                {/* Existing Notes List */}
+                <div className="notes-list">
+                  {getDayNotes(selectedDay).map(note => (
+                    <div key={note.id} className="note-item">
+                      <div 
+                        className="note-color-indicator" 
+                        style={{ backgroundColor: note.type === 'todo' ? note.color : note.tag.color }}
+                      />
+                      <div className="note-content">
+                        <div className="note-name">{note.name}</div>
+                        <div className="note-meta">
+                          {note.type === 'todo' ? 'To-do List' : note.tag.name}
+                          {note.emotion && ` • ${emotions.find(e => e.id === note.emotion)?.emoji}`}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Add Note Button */}
+                <button className="add-note-btn" onClick={handleCreateNote}>
+                  <span className="add-note-icon">+</span>
+                  <span>Create New Note</span>
+                </button>
+              </>
+            ) : (
+              <>
+                {/* Note Creation View */}
+                {!noteType ? (
+                  <div className="note-type-selection">
+                    <button className="back-btn" onClick={handleBackFromNoteCreation}>
+                      ← Back
+                    </button>
+                    <h3 className="note-type-title">Choose Note Type</h3>
+                    <div className="note-type-options">
+                      <button 
+                        className="note-type-option note-type-todo"
+                        onClick={() => handleNoteTypeSelect('todo')}
+                      >
+                        <div className="note-type-icon">✓</div>
+                        <div className="note-type-label">To-do List</div>
+                        <div className="note-type-color" style={{ backgroundColor: '#000000' }} />
+                      </button>
+                      <button 
+                        className="note-type-option note-type-note"
+                        onClick={() => handleNoteTypeSelect('note')}
+                      >
+                        <div className="note-type-icon">📝</div>
+                        <div className="note-type-label">Note</div>
+                        <div className="note-type-description">With custom tags</div>
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="note-form">
+                    <button className="back-btn" onClick={handleBackFromNoteCreation}>
+                      ← Back
+                    </button>
+                    
+                    <h3 className="note-form-title">
+                      {noteType === 'todo' ? 'Create To-do List' : 'Create Note'}
+                    </h3>
+
+                    <div className="form-group">
+                      <label className="form-label">Name</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        value={noteName}
+                        onChange={(e) => setNoteName(e.target.value)}
+                        placeholder={noteType === 'todo' ? 'Enter task name' : 'Enter note name'}
+                        autoFocus
+                      />
+                    </div>
+
+                    {noteType === 'note' && (
+                      <div className="form-group">
+                        <label className="form-label">Select Tag</label>
+                        <div className="tag-list">
+                          {tags.map(tag => (
+                            <label key={tag.id} className="tag-option">
+                              <input
+                                type="radio"
+                                name="tag"
+                                value={tag.id}
+                                checked={selectedTag === tag.id}
+                                onChange={() => setSelectedTag(tag.id)}
+                                className="tag-radio-input"
+                              />
+                              <div className="tag-radio-btn">
+                                <div 
+                                  className="tag-color" 
+                                  style={{ backgroundColor: tag.color }}
+                                />
+                                <span className="tag-name">{tag.name}</span>
+                              </div>
+                            </label>
+                          ))}
+                        </div>
+
+                        {!showNewTagForm ? (
+                          <button 
+                            className="create-tag-btn"
+                            onClick={() => setShowNewTagForm(true)}
+                            type="button"
+                          >
+                            + Create New Tag
+                          </button>
+                        ) : (
+                          <div className="new-tag-form">
+                            <div className="new-tag-inputs">
+                              <input
+                                type="text"
+                                className="form-input"
+                                value={newTagName}
+                                onChange={(e) => setNewTagName(e.target.value)}
+                                placeholder="Tag name"
+                              />
+                              <div className="color-picker-wrapper">
+                                <input
+                                  type="color"
+                                  className="color-picker"
+                                  value={newTagColor}
+                                  onChange={(e) => setNewTagColor(e.target.value)}
+                                />
+                                <div 
+                                  className="color-preview" 
+                                  style={{ backgroundColor: newTagColor }}
+                                />
+                              </div>
+                            </div>
+                            <div className="new-tag-actions">
+                              <button 
+                                className="btn btn-secondary"
+                                onClick={() => {
+                                  setShowNewTagForm(false)
+                                  setNewTagName('')
+                                  setNewTagColor('#FF6B6B')
+                                }}
+                                type="button"
+                              >
+                                Cancel
+                              </button>
+                              <button 
+                                className="btn btn-primary"
+                                onClick={handleCreateNewTag}
+                                disabled={!newTagName.trim()}
+                                type="button"
+                              >
+                                Add Tag
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <button 
+                      className="btn btn-primary btn-save"
+                      onClick={handleSaveNote}
+                      disabled={!canSaveNote()}
+                      type="button"
+                    >
+                      Save {noteType === 'todo' ? 'To-do' : 'Note'}
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="calendar-bottom-spacer" aria-hidden="true" />
     </div>
   )
