@@ -1,0 +1,68 @@
+.calendar-page--with-sidebar .account-main {
+  margin-left: 260px;
+}
+
+/* Main area */
+.account-main {
+  padding: 64px 80px;
+  background: #f4f1ec;
+  min-height: 100vh;
+  transition: margin-left 0.3s ease;
+}
+
+/* Header */
+.account-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 40px;
+}
+
+.account-title {
+  font-size: 28px;
+  font-weight: 600;
+  color: #4c3734;
+}
+
+.account-edit-btn {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 14px;
+  color: #6e5a5a;
+}
+
+/* Body layout */
+.account-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 48px;
+}
+
+/* Avatar */
+.account-avatar img {
+  width: 160px;
+  height: 160px;
+  border-radius: 16px;
+  object-fit: cover;
+  background: #ffffff;
+}
+
+/* Info text */
+.account-info {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 6px;
+}
+
+.account-info p {
+  font-size: 15px;
+  color: #555;
+}
+
+.account-info span {
+  font-weight: 500;
+  color: #4c3734;
+  margin-right: 6px;
+}
