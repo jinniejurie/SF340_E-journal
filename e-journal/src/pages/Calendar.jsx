@@ -415,7 +415,7 @@ function Calendar() {
         </button>
         <div className="calendar-sidebar-header">ejournal</div>
         <nav className="calendar-sidebar-nav" aria-label="Calendar navigation">
-          <button type="button" className="calendar-sidebar-link">
+          <button type="button" className="calendar-sidebar-link" onClick={() => { navigate('/account'); setIsSidebarOpen(false); }}>
             <span className="calendar-sidebar-link-icon">
               <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                 <path d="M12 12c1.66 0 3-1.34 3-3S13.66 6 12 6s-3 1.34-3 3 1.34 3 3 3Zm0 2c-2.33 0-7 1.17-7 3.5V19c0 1.1.9 2 2 2h10a2 2 0 0 0 2-2v-1.5C19 15.17 14.33 14 12 14Z" fill="currentColor" />

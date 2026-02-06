@@ -1,0 +1,172 @@
+@import url('https://fonts.googleapis.com/css2?family=Afacad:wght@400;700&display=swap');
+
+.account { font-family: 'Afacad', sans-serif; }
+.account * { box-sizing: border-box; }
+
+.account .app-container {
+  min-height: 100vh;
+  background-color: #F0EEEB;
+  padding: 3rem 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.5s;
+  position: relative;
+}
+.account .decorative-blur-1 { position: fixed; top: 2.5rem; right: 2.5rem; width: 16rem; height: 16rem; background-color: #F2ECC3; border-radius: 50%; opacity: 0.2; filter: blur(60px); z-index: -10; }
+.account .decorative-blur-2 { position: fixed; bottom: 2.5rem; left: 2.5rem; width: 24rem; height: 24rem; background-color: #5D4B4B; border-radius: 50%; opacity: 0.1; filter: blur(60px); z-index: -10; }
+.account .content-wrapper { width: 100%; max-width: 64rem; }
+.account .customize-section { margin-bottom: 1.5rem; display: flex; justify-content: flex-end; }
+.account .customize-button-wrapper { position: relative; }
+.account .customize-button { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; background-color: rgba(255,255,255,0.9); backdrop-filter: blur(8px); border-radius: 9999px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); border: none; cursor: pointer; transition: box-shadow 0.3s; font-family: 'Afacad', sans-serif; }
+.account .customize-button:hover { box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1); }
+.account .customize-button-icon { color: #5D4B4B; }
+.account .customize-button-text { color: #5D4B4B; font-size: 0.875rem; }
+.account .customize-panel { position: absolute; right: 0; margin-top: 0.5rem; background-color: white; border-radius: 0.75rem; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25); padding: 1.25rem; width: 20rem; z-index: 10; max-height: 80vh; overflow-y: auto; }
+.account .customize-section-header { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: rgba(93,75,75,0.6); margin-bottom: 0.75rem; font-family: 'Afacad', sans-serif; }
+.account .color-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 0.75rem; margin-bottom: 1.5rem; }
+.account .color-preset-button { position: relative; border: none; background: none; cursor: pointer; padding: 0; }
+.account .color-preset-box { width: 100%; height: 3rem; border-radius: 0.5rem; transition: all 0.3s; display: flex; align-items: center; justify-content: center; }
+.account .color-preset-button:hover .color-preset-box { transform: scale(1.1); box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); }
+.account .color-preset-checkmark { font-size: 1.5rem; }
+.account .background-divider { border-top: 1px solid rgba(93,75,75,0.1); padding-top: 1.25rem; }
+.account .bg-type-tabs{ display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+.account .bg-type-tab{ flex: 1; padding: 0.5rem 0.75rem; border-radius: 0.5rem; font-size: 0.875rem; transition: all 0.3s; border: none; cursor: pointer; font-family: 'Afacad', sans-serif; }
+.account .bg-color-grid{ display: grid; grid-template-columns: repeat(3,1fr); gap: 0.75rem; }
+.account .bg-color-button{ position: relative; border: none; background: none; cursor: pointer; padding: 0; }
+.account .bg-color-box{ width: 100%; height: 3rem; border-radius: 0.5rem; border: 2px solid; transition: all 0.3s; display: flex; align-items: center; justify-content: center; }
+.account .bg-color-button:hover .bg-color-box{ transform: scale(1.1); box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); }
+.account .bg-image-grid{ display: grid; grid-template-columns: repeat(2,1fr); gap: 0.75rem; margin-bottom: 0.75rem; }
+.account .bg-image-button{ position: relative; height: 5rem; border-radius: 0.5rem; overflow: hidden; transition: all 0.3s; border: none; cursor: pointer; padding: 0; }
+.account .bg-image-button:hover{ transform: scale(1.05); }
+.account .bg-image-img{ width: 100%; height: 100%; object-fit: cover; }
+.account .bg-image-selected-overlay{ position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background-color: rgba(0,0,0,0.2); }
+.account .bg-image-checkmark{ color: white; font-size: 1.5rem; }
+.account .upload-button-label{ display: block; width: 100%; }
+.account .upload-button{ display: flex; align-items: center; justify-content: center; gap: 0.5rem; padding: 0.75rem 1rem; background-color: #F2ECC3; border-radius: 0.5rem; cursor: pointer; transition: background-color 0.3s; border: none; width: 100%; font-family: 'Afacad', sans-serif; }
+.account .upload-button:hover{ background-color: #e8dfa5; }
+.account .upload-button-icon{ color: #5D4B4B; }
+.account .upload-button-text{ color: #5D4B4B; font-size: 0.875rem; }
+.account .upload-input{ display: none; }
+.account .id-card{ border-radius: 1rem; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25); overflow: hidden; }
+.account .card-header{ padding: 1.5rem 2rem; display: flex; align-items: center; justify-content: space-between; }
+.account .card-header-left{ display: flex; align-items: center; gap: 0.75rem; }
+.account .card-header-title{ font-size: 1.875rem; letter-spacing: 0.025em; font-family: 'Afacad', sans-serif; }
+.account .card-header-subtitle{ font-size: 0.875rem; letter-spacing: 0.05em; font-family: 'Afacad', sans-serif; }
+.account .card-header-right{ text-align: right; }
+.account .card-header-since{ font-size: 0.75rem; letter-spacing: 0.1em; text-transform: uppercase; font-family: 'Afacad', sans-serif; }
+.account .card-header-year{ font-weight: 500; font-size: 1.125rem; font-family: 'Afacad', sans-serif; }
+.account .card-body{ padding: 2rem; }
+.account .card-body-grid{ display: grid; grid-template-columns: auto 1fr; gap: 2rem; align-items: center; }
+.account .profile-section{ display: flex; flex-direction: column; align-items: center; }
+.account .details-section{ display: flex; flex-direction: column; gap: 1.5rem; }
+.account .details-header{ margin-bottom: 1.5rem; }
+.account .details-title{ font-size: 1.5rem; color: #5D4B4B; font-family: 'Afacad', sans-serif; margin: 0 0 0.25rem 0; }
+.account .details-subtitle{ color: rgba(93,75,75,0.6); font-size: 0.875rem; font-family: 'Afacad', sans-serif; margin: 0; }
+.account .field-row{ display: flex; align-items: flex-start; gap: 1rem; }
+.account .field-icon-wrapper{ margin-top: 0.75rem; padding: 0.75rem; border-radius: 0.5rem; }
+.account .field-content{ flex: 1; }
+.account .card-footer{ padding: 1rem 2rem; }
+.account .card-footer-content{ display: flex; align-items: center; justify-content: space-between; font-size: 0.875rem; }
+.account .card-footer-text{ font-style: italic; font-family: 'Afacad', sans-serif; }
+.account .card-footer-valid{ letter-spacing: 0.1em; text-transform: uppercase; font-size: 0.75rem; font-family: 'Afacad', sans-serif; }
+@media (max-width: 768px) {
+  .account .card-body-grid { grid-template-columns: 1fr; gap: 1.5rem; }
+  .account .profile-section { align-items: center; }
+  .account .card-header { flex-direction: column; align-items: flex-start; gap: 1rem; }
+  .account .card-footer-content { flex-direction: column; gap: 0.5rem; align-items: flex-start; }
+}
+@media (min-width: 769px) { .account .profile-section {align-items:flex-start;} }
+
+/* EditableField (field) pure style */
+.account .editable-field { position: relative; }
+.account .field-label {
+  display: block;
+  font-size: 0.875rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #5D4B4B;
+  opacity: 0.7;
+  margin-bottom: 0.5rem;
+  font-family: 'Afacad', sans-serif;
+}
+.account .field-view { display: flex; align-items: center; gap: 0.75rem; }
+.account .field-value {
+  flex: 1;
+  color: #5D4B4B;
+  padding: 0.75rem 1rem;
+  background-color: rgba(242, 236, 195, 0.3);
+  border-radius: 0.5rem;
+  border: 2px solid transparent;
+  font-family: 'Afacad', sans-serif;
+}
+.account .field-edit-button {
+  opacity: 0;
+  transition: opacity 0.3s;
+  padding: 0.5rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  border-radius: 0.5rem;
+}
+.account .editable-field:hover .field-edit-button {
+  opacity: 1;
+}
+.account .field-edit-button:hover {
+  background-color: rgba(242,236,195,0.5);
+}
+.account .field-edit-button-icon { color: #5D4B4B; }
+.account .field-edit-mode {display: flex;align-items: center;gap: 0.5rem;}
+.account .field-input {
+  flex: 1;
+  padding: 0.75rem 1rem;
+  background-color: white;
+  border-radius: 0.5rem;
+  outline: none;
+  color: #5D4B4B;
+  font-family: 'Afacad', sans-serif;
+  font-size: 1rem;
+}
+.account .field-input:focus {
+  outline: 2px solid;
+  outline-offset: 2px;
+}
+.account .field-save-button {
+  padding: 0.5rem;
+  border-radius: 0.5rem;
+  transition: opacity 0.3s;
+  border: none;
+  cursor: pointer;
+}
+.account .field-cancel-button {
+  padding: 0.5rem;
+  background-color: #F2ECC3;
+  color: #5D4B4B;
+  border-radius: 0.5rem;
+  transition: background-color 0.3s;
+  border: none;
+  cursor: pointer;
+}
+.account .field-cancel-button:hover {
+  background-color: #e8dfa5;
+}
+.account .editable-field-error{ color:#d4183d;font-size:0.87em;margin-top:0.25em;font-weight:500; }
+/* ProfileHeader CSS */
+.account .profile-header { position: relative; }
+.account .profile-image-wrapper {
+  width: 12rem;
+  height: 15rem;
+  border-radius: 15px;
+  overflow: hidden;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+}
+.account .profile-image { width: 100%; height: 100%; object-fit: cover; }
+.account .profile-upload-label {
+  position: absolute; bottom: 0.5rem; right: 0.5rem;
+  padding: 0.75rem; border-radius: 9999px; cursor: pointer; opacity: 0;
+  transition: all 0.3s; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+  border: none;
+}
+.account .profile-header:hover .profile-upload-label { opacity: 1; }
+.account .profile-upload-label:hover { transform: scale(1.1); }
+.account .profile-upload-input { display: none; }
