@@ -1,6 +1,5 @@
 import { useState } from "react";
 import {
-  Sparkles,
   User,
   Mail,
   Calendar,
@@ -78,15 +77,15 @@ function EditableField({
 
   return (
     <div className="editable-field">
-      <label className="field-label">{label}</label>
+      <label className="field-label" style={{ color: textColor }}>{label}</label>
       {!isEditing ? (
         <div className="field-view">
-          <div className="field-value">{value || "Not set"}</div>
+          <div className="field-value" style={{ color: textColor }}>{value || "Not set"}</div>
           <button
             onClick={() => setIsEditing(true)}
             className="field-edit-button"
           >
-            <Edit2 size={18} className="field-edit-button-icon" />
+            <Edit2 size={18} className="field-edit-button-icon" style={{ color: textColor }} />
           </button>
         </div>
       ) : (
@@ -96,7 +95,7 @@ function EditableField({
             value={editValue}
             onChange={e => setEditValue(e.target.value)}
             className="field-input"
-            style={{ border: `2px solid ${accentColor}`, outlineColor: accentColor }}
+            style={{ border: `2px solid ${accentColor}`, outlineColor: accentColor, color: textColor }}
             autoFocus
           />
           <button
@@ -117,50 +116,50 @@ function EditableField({
 }
 
 const COLOR_PRESETS = [
-  { name: "Default Earth", color: "#5D4B4B" },
-  { name: "Sunset Orange", color: "#E36A3F" },
-  { name: "Deep Wine", color: "#702E26" },
-  { name: "Soft Lavender", color: "#CCD8FF" },
-  { name: "Warm Cream", color: "#F2ECC3" },
-  { name: "Lilac Dream", color: "#DCC9F7" },
+  { name: "Lavender", color: "#e8d2e2" },
+  { name: "Beige", color: "#F0EEEB" },
+  { name: "Earth Brown", color: "#5D4B4B" },
+  { name: "Light Slate", color: "#DDE6ED" },
+  { name: "Olive Green", color: "#cbd183" },
+  { name: "Soft Yellow", color: "#FFF1B5" },
 ];
 const BACKGROUND_COLORS = [
-  { name: "White", color: "#FFFFFF" },
-  { name: "Warm Beige", color: "#F0EEEB" },
-  { name: "Soft Pink", color: "#F5E6E8" },
-  { name: "Light Sage", color: "#E8F3E8" },
-  { name: "Pale Blue", color: "#E8F4F8" },
-  { name: "Cream", color: "#FFF8E7" },
+  { name: "Lavender", color: "#e8d2e2" },
+  { name: "Beige", color: "#F0EEEB" },
+  { name: "Earth Brown", color: "#5D4B4B" },
+  { name: "Light Slate", color: "#DDE6ED" },
+  { name: "Olive Green", color: "#cbd183" },
+  { name: "Soft Yellow", color: "#FFF1B5" },
 ];
 const BACKGROUND_IMAGES = [
-  { name: "Abstract Art", url: "https://images.unsplash.com/photo-1667980930112-4d1157f62892?auto=format&fit=crop&w=800&q=80" },
-  { name: "Minimal Beige", url: "https://images.unsplash.com/photo-1638303322579-343c8154b80e?auto=format&fit=crop&w=800&q=80" },
-  { name: "Watercolor", url: "https://images.unsplash.com/photo-1606385887663-6f42177f5c3b?auto=format&fit=crop&w=800&q=80" },
-  { name: "Marble", url: "https://images.unsplash.com/photo-1669102046402-7c5e93766565?auto=format&fit=crop&w=800&q=80" },
+  { name: "Scott Pattern", url: "https://i.pinimg.com/736x/64/eb/18/64eb1837887b2dcb2b679d613dbc21a6.jpg" },
+  { name: "Stripes1", url: "https://i.pinimg.com/1200x/dc/e7/2e/dce72eeb583a7cff9fc648b215d8dad9.jpg" },
+  { name: "Polkadot", url: "https://i.pinimg.com/1200x/43/05/eb/4305eb0ada33adbdf20b6474a3ddbae7.jpg" },
+  { name: "Stripes2", url: "https://i.pinimg.com/736x/88/7c/91/887c9105dcf49bc02470e19224ae450f.jpg" },
 ];
 const EXISTING_USERNAMES = ["alex rivera", "user123", "minou"];
 function getContrastColor(hexColor) {
+  if (!hexColor) return '#5D4B4B';
   const hex = hexColor.replace("#", "");
   const r = parseInt(hex.substring(0, 2), 16);
   const g = parseInt(hex.substring(2, 4), 16);
   const b = parseInt(hex.substring(4, 6), 16);
   const brightness = (r * 299 + g * 587 + b * 114) / 1000;
-  return brightness > 155 ? "#2D2D2D" : "#F0EEEB";
+  return brightness < 170 ? "#F7F7F7" : "#5D4B4B";
 }
 
 export default function Account() {
-  const [profileImage, setProfileImage] = useState(
-    "https://images.unsplash.com/photo-1734983358017-3f91bc716b0a?auto=format&fit=crop&w=332&q=80"
-  );
+  const [profileImage, setProfileImage] = useState("https://i.pinimg.com/736x/aa/7e/23/aa7e23dc1740c0303784aa096aa32966.jpg");
   const [username, setUsername] = useState("Alex Rivera");
   const [email, setEmail] = useState("alex.rivera@journal.app");
   const [birthday, setBirthday] = useState("1995-06-15");
   const [selectedColor, setSelectedColor] = useState("#5D4B4B");
   const [showCustomizePanel, setShowCustomizePanel] = useState(false);
   const [cardBgType, setCardBgType] = useState("color");
-  const [cardBgColor, setCardBgColor] = useState("#F7F7F7");
+  const [cardBgColor, setCardBgColor] = useState("#F0EEEB");
   const [cardBgImage, setCardBgImage] = useState("");
   const [error, setError] = useState("");
+
   const validateUsername = (val) => {
     if (!val) return "Username is required";
     if (EXISTING_USERNAMES.includes(val.trim().toLowerCase()) && val.trim().toLowerCase() !== "alex rivera") {
@@ -180,22 +179,22 @@ export default function Account() {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(val)) return "Invalid date format";
     return "";
   };
-  const textColor = getContrastColor(selectedColor);
+
+  const headerTextColor = getContrastColor(selectedColor);
+  const userInfoTextColor = cardBgType === 'color' ? getContrastColor(cardBgColor) : getContrastColor(cardBgColor);
+
   const handleImageChange = (file) => {
     const reader = new FileReader();
     reader.onloadend = () => setProfileImage(reader.result);
     reader.readAsDataURL(file);
   };
-  const handleCardBgImageUpload = (e) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setCardBgImage(reader.result);
-        setCardBgType("image");
-      };
-      reader.readAsDataURL(file);
-    }
+  const handleCardBgColor = (bgColor) => {
+    setCardBgColor(bgColor);
+    setCardBgType("color");
+  };
+  const handleCardBgImage = (bgUrl) => {
+    setCardBgImage(bgUrl);
+    setCardBgType("image");
   };
   const cardBackgroundStyle =
     cardBgType === "image" && cardBgImage
@@ -245,12 +244,7 @@ export default function Account() {
                           }}
                         >
                           {selectedColor === preset.color && (
-                            <span
-                              style={{ color: getContrastColor(preset.color) }}
-                              className="color-preset-checkmark"
-                            >
-                              ✓
-                            </span>
+                            <Check className="color-preset-checkmark" size={19} style={{ color: getContrastColor(preset.color) }} />
                           )}
                         </div>
                       </button>
@@ -266,7 +260,7 @@ export default function Account() {
                       style={{
                         backgroundColor:
                           cardBgType === "color" ? selectedColor : "#F2ECC3",
-                        color: cardBgType === "color" ? textColor : "#5D4B4B",
+                        color: cardBgType === "color" ? getContrastColor(selectedColor) : "#5D4B4B",
                       }}
                     >
                       Color
@@ -277,7 +271,7 @@ export default function Account() {
                       style={{
                         backgroundColor:
                           cardBgType === "image" ? selectedColor : "#F2ECC3",
-                        color: cardBgType === "image" ? textColor : "#5D4B4B",
+                        color: cardBgType === "image" ? getContrastColor(selectedColor) : "#5D4B4B",
                       }}
                     >
                       Image
@@ -288,10 +282,7 @@ export default function Account() {
                       {BACKGROUND_COLORS.map((bg) => (
                         <button
                           key={bg.color}
-                          onClick={() => {
-                            setCardBgColor(bg.color);
-                            setCardBgType("color");
-                          }}
+                          onClick={() => handleCardBgColor(bg.color)}
                           className="bg-color-button"
                           title={bg.name}
                         >
@@ -308,12 +299,7 @@ export default function Account() {
                           >
                             {cardBgColor === bg.color &&
                               cardBgType === "color" && (
-                                <span
-                                  className="color-preset-checkmark"
-                                  style={{ color: "#5D4B4B" }}
-                                >
-                                  ✓
-                                </span>
+                                <Check className="color-preset-checkmark" size={19} style={{ color: getContrastColor(bg.color) }} />
                               )}
                           </div>
                         </button>
@@ -326,10 +312,7 @@ export default function Account() {
                         {BACKGROUND_IMAGES.map((bg) => (
                           <button
                             key={bg.url}
-                            onClick={() => {
-                              setCardBgImage(bg.url);
-                              setCardBgType("image");
-                            }}
+                            onClick={() => handleCardBgImage(bg.url)}
                             className="bg-image-button"
                             title={bg.name}
                             style={{
@@ -348,7 +331,7 @@ export default function Account() {
                             {cardBgImage === bg.url &&
                               cardBgType === "image" && (
                                 <div className="bg-image-selected-overlay">
-                                  <span className="bg-image-checkmark">✓</span>
+                                  <Check size={19} style={{ color: '#fff' }} />
                                 </div>
                               )}
                           </button>
@@ -367,7 +350,17 @@ export default function Account() {
                         <input
                           type="file"
                           accept="image/*"
-                          onChange={handleCardBgImageUpload}
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              const reader = new FileReader();
+                              reader.onloadend = () => {
+                                setCardBgImage(reader.result);
+                                setCardBgType("image");
+                              };
+                              reader.readAsDataURL(file);
+                            }
+                          }}
                           className="upload-input"
                         />
                       </label>
@@ -380,32 +373,19 @@ export default function Account() {
         </div>
         {/* ID Card */}
         <div className="id-card" style={cardBackgroundStyle}>
-          <div
-            className="card-header"
-            style={{ background: `linear-gradient(to right, ${selectedColor}, ${selectedColor}dd)` }}
-          >
+          <div className="card-header" style={{ background: selectedColor }}>
             <div className="card-header-left">
-              <Sparkles style={{ color: textColor }} size={28} />
               <div className="card-header-title-section">
-                <h1 className="card-header-title" style={{ color: textColor }}>
-                  Journaly Member
+                <h1 className="card-header-title" style={{ color: headerTextColor }}>
+                  Dot Text Member
                 </h1>
-                <p
-                  className="card-header-subtitle"
-                  style={{ color: `${textColor}cc` }}
-                >
-                  Creative Identity
-                </p>
               </div>
             </div>
             <div className="card-header-right">
-              <p
-                className="card-header-since"
-                style={{ color: `${textColor}99` }}
-              >
+              <p className="card-header-since" style={{ color: `${headerTextColor}99` }}>
                 Since
               </p>
-              <p className="card-header-year" style={{ color: textColor }}>
+              <p className="card-header-year" style={{ color: headerTextColor }}>
                 2024
               </p>
             </div>
@@ -417,13 +397,17 @@ export default function Account() {
                   profileImage={profileImage}
                   onImageChange={handleImageChange}
                   accentColor={selectedColor}
-                  textColor={textColor}
+                  textColor={headerTextColor}
                 />
               </div>
-              <div className="details-section">
+              <div className="details-section" style={{ color: userInfoTextColor }}>
                 <div className="details-header">
-                  <h2 className="details-title">Personal Details</h2>
-                  <p className="details-subtitle">Hover over fields to edit</p>
+                  <h2 className="details-title" style={{ color: userInfoTextColor }}>
+                    Personal Details
+                  </h2>
+                  <p className="details-subtitle" style={{ color: userInfoTextColor }}>
+                    Hover over fields to edit
+                  </p>
                 </div>
                 {/* Username Field */}
                 <div className="field-row">
@@ -431,7 +415,7 @@ export default function Account() {
                     className="field-icon-wrapper"
                     style={{ backgroundColor: `${selectedColor}20` }}
                   >
-                    <User style={{ color: selectedColor }} size={20} />
+                    <User style={{ color: userInfoTextColor }} size={20} />
                   </div>
                   <div className="field-content">
                     <EditableField
@@ -439,7 +423,7 @@ export default function Account() {
                       value={username}
                       onSave={setUsername}
                       accentColor={selectedColor}
-                      textColor={textColor}
+                      textColor={userInfoTextColor}
                       validator={validateUsername}
                       error={error}
                       setError={setError}
@@ -452,7 +436,7 @@ export default function Account() {
                     className="field-icon-wrapper"
                     style={{ backgroundColor: `${selectedColor}20` }}
                   >
-                    <Mail style={{ color: selectedColor }} size={20} />
+                    <Mail style={{ color: userInfoTextColor }} size={20} />
                   </div>
                   <div className="field-content">
                     <EditableField
@@ -461,7 +445,7 @@ export default function Account() {
                       type="email"
                       onSave={setEmail}
                       accentColor={selectedColor}
-                      textColor={textColor}
+                      textColor={userInfoTextColor}
                       validator={validateEmail}
                       error={error}
                       setError={setError}
@@ -474,7 +458,7 @@ export default function Account() {
                     className="field-icon-wrapper"
                     style={{ backgroundColor: `${selectedColor}20` }}
                   >
-                    <Calendar style={{ color: selectedColor }} size={20} />
+                    <Calendar style={{ color: userInfoTextColor }} size={20} />
                   </div>
                   <div className="field-content">
                     <EditableField
@@ -483,7 +467,7 @@ export default function Account() {
                       type="date"
                       onSave={setBirthday}
                       accentColor={selectedColor}
-                      textColor={textColor}
+                      textColor={userInfoTextColor}
                       validator={validateBirthday}
                       error={error}
                       setError={setError}
@@ -493,20 +477,9 @@ export default function Account() {
               </div>
             </div>
           </div>
-          <div
-            className="card-footer"
-            style={{
-              backgroundColor: `${selectedColor}15`,
-              borderTop: `2px solid ${selectedColor}20`,
-            }}
-          >
-            <div
-              className="card-footer-content"
-              style={{ color: `${selectedColor}cc` }}
-            >
-              <p className="card-footer-text">
-                This card represents your creative identity
-              </p>
+          <div className="card-footer" style={{ backgroundColor: selectedColor, borderTop: `2px solid ${selectedColor}20` }}>
+            <div className="card-footer-content" style={{ color: `${headerTextColor}cc` }}>
+              <p className="card-footer-text">This card represents your creative identity</p>
               <p className="card-footer-valid">Valid Forever</p>
             </div>
           </div>
