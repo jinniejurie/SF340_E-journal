@@ -1,10 +1,73 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import '../styles/Calendar.css'
+import '../styles/Account.css'
 
 function Account() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
   const navigate = useNavigate()
+  const [isEditMode, setIsEditMode] = useState(false)
+  const [profileImage, setProfileImage] = useState('')
+  const [formData, setFormData] = useState({
+    username: 'King_Kylie',
+    birthday: '01/11/2011',
+    email: 'KingKongKung@gmail.com',
+    address: '1412 Beanie, LA'
+  })
+  const [tempFormData, setTempFormData] = useState(formData)
+
+  // Load profile from localStorage on mount
+  useEffect(() => {
+    const savedProfile = localStorage.getItem('ejournal-profile')
+    if (savedProfile) {
+      try {
+        const profile = JSON.parse(savedProfile)
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setFormData(profile)
+        setProfileImage(profile.profileImage || '')
+      } catch (e) {
+        console.error('Error loading profile:', e)
+      }
+    }
+  }, [])
+
+  const handleImageUpload = (e) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      const reader = new FileReader()
+      reader.onloadend = () => {
+        setProfileImage(reader.result)
+      }
+      reader.readAsDataURL(file)
+    }
+  }
+
+  const handleEditClick = () => {
+    setIsEditMode(true)
+    setTempFormData(formData)
+  }
+
+  const handleInputChange = (field, value) => {
+    setTempFormData(prev => ({
+      ...prev,
+      [field]: value
+    }))
+  }
+
+  const handleSave = () => {
+    const updatedProfile = {
+      ...tempFormData,
+      profileImage
+    }
+    setFormData(updatedProfile)
+    localStorage.setItem('ejournal-profile', JSON.stringify(updatedProfile))
+    setIsEditMode(false)
+  }
+
+  const handleCancel = () => {
+    setIsEditMode(false)
+    setTempFormData(formData)
+  }
 
   const toggleSidebar = () => {
     setIsSidebarOpen(prev => !prev)
@@ -103,24 +166,100 @@ function Account() {
         <main className="account-main">
             <div className="account-header">
             <h1 className="account-title">Profile</h1>
-            <button className="account-edit-btn">✏️</button>
+            {!isEditMode && (
+              <button className="account-edit-btn" onClick={handleEditClick}>✏️</button>
+            )}
             </div>
 
-            <div className="account-body">
-            <div className="account-avatar">
-                <img
-                src="https://via.placeholder.com/160"
-                alt="profile"
-                />
-            </div>
+            {!isEditMode ? (
+              // View Mode
+              <div className="account-body">
+                <div className="account-avatar">
+                  <img
+                    src={profileImage || "https://dummyimage.com/160x160/cccccc/ffffff&text=Profile"}
+                    alt="profile"
+                  />
+                </div>
 
-            <div className="account-info">
-                <p><span>Username:</span> King_Kylie</p>
-                <p><span>Birthday:</span> 01/11/2011</p>
-                <p><span>Email:</span> KingKongKung@gmail.com</p>
-                <p><span>Address:</span> 1412 Beanie, LA</p>
-            </div>
-            </div>
+                <div className="account-info">
+                  <p><span>Username:</span> {formData.username}</p>
+                  <p><span>Birthday:</span> {formData.birthday}</p>
+                  <p><span>Email:</span> {formData.email}</p>
+                  <p><span>Address:</span> {formData.address}</p>
+                </div>
+              </div>
+            ) : (
+              // Edit Mode
+              <div className="account-edit-form">
+                <div className="form-section">
+                  <h3>Profile Picture</h3>
+                  <div className="profile-image-upload">
+                    <img
+                      src={profileImage || "https://dummyimage.com/160x160/cccccc/ffffff&text=Profile"}
+                      alt="profile preview"
+                      className="profile-preview"
+                    />
+                    <label className="upload-btn">
+                      📤 Upload Image
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleImageUpload}
+                        style={{ display: 'none' }}
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                <div className="form-section">
+                  <h3>Personal Information</h3>
+                  <div className="form-group">
+                    <label>Username</label>
+                    <input
+                      type="text"
+                      value={tempFormData.username}
+                      onChange={(e) => handleInputChange('username', e.target.value)}
+                      placeholder="Enter username"
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label>Birthday</label>
+                    <input
+                      type="text"
+                      value={tempFormData.birthday}
+                      onChange={(e) => handleInputChange('birthday', e.target.value)}
+                      placeholder="DD/MM/YYYY"
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label>Email</label>
+                    <input
+                      type="email"
+                      value={tempFormData.email}
+                      onChange={(e) => handleInputChange('email', e.target.value)}
+                      placeholder="Enter email"
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label>Address</label>
+                    <textarea
+                      value={tempFormData.address}
+                      onChange={(e) => handleInputChange('address', e.target.value)}
+                      placeholder="Enter address"
+                      rows="3"
+                    />
+                  </div>
+                </div>
+
+                <div className="form-actions">
+                  <button className="btn-save" onClick={handleSave}>💾 Save</button>
+                  <button className="btn-cancel" onClick={handleCancel}>❌ Cancel</button>
+                </div>
+              </div>
+            )}
         </main>
     </div>
   )
