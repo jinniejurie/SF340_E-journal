@@ -5,6 +5,7 @@ import Login from './pages/Login.jsx'
 import Signup from './pages/Signup.jsx'
 import Calendar from './pages/Calendar.jsx'
 import ToDoList from './pages/ToDoList.jsx'
+import Note from './pages/Note.jsx'
 
 function App() {
   return (
@@ -14,6 +15,7 @@ function App() {
       <Route path="/signup" element={<Signup />} />
       <Route path="/calendar" element={<Calendar />} />
       <Route path="/calendar/toDoList" element={<ToDoList />} />
+      <Route path="/calendar/note" element={<Note />} />
     </Routes>
   )
 }

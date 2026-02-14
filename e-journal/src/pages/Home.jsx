@@ -40,7 +40,7 @@ function Home() {
             <br />
             <span className="home-hero-title-line">one page at a time</span>
           </h1>
-          <button type="button" className="home-hero-cta" onClick={goToCalendar}>
+          <button type="button" className="home-hero-cta" onClick={goToSignup}>
             Let Started
           </button>
         </section>

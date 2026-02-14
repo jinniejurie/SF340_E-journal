@@ -4,7 +4,7 @@ import { doc, serverTimestamp, setDoc } from 'firebase/firestore'
 
 import LoginImg from '../assets/LoginImg.svg'
 import '../styles/Auth.css'
-import { signup } from '../services/authService'
+import { signup, signOut } from '../services/authService'
 import { db } from '../services/firebase'
 
 function Signup() {
@@ -17,6 +17,7 @@ function Signup() {
   const [confirmPassword, setConfirmPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [showSuccessPopup, setShowSuccessPopup] = useState(false)
 
   const navigate = useNavigate()
 
@@ -55,12 +56,19 @@ function Signup() {
         },
       })
 
-      navigate('/login')
+      // 3. Sign out so user is not auto-logged in
+      await signOut()
+      setShowSuccessPopup(true)
     } catch (err) {
       setError(err.message || 'Failed to sign up. Please try again.')
     } finally {
       setLoading(false)
     }
+  }
+
+  const closeSuccessPopup = () => {
+    setShowSuccessPopup(false)
+    navigate('/login')
   }
 
   return (
@@ -150,6 +158,18 @@ function Signup() {
           </p>
         </section>
       </div>
+
+      {showSuccessPopup && (
+        <div className="auth-popup-overlay" role="dialog" aria-modal="true" aria-labelledby="auth-popup-title">
+          <div className="auth-popup">
+            <h2 id="auth-popup-title" className="auth-popup-title">Account created</h2>
+            <p className="auth-popup-text">You can now log in with your email and password.</p>
+            <button type="button" className="auth-popup-btn" onClick={closeSuccessPopup}>
+              OK
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
