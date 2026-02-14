@@ -1,6 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { ChevronLeft, Download, Share2, Palette, Plus } from 'lucide-react'
+import html2canvas from 'html2canvas'
+import { jsPDF } from 'jspdf'
 import '../styles/ToDoList.css'
 
 const getTodoFromCalendar = (todoId) => {
@@ -53,6 +55,7 @@ function ToDoList() {
 
   const [paperColor, setPaperColor] = useState('#F7F7F7')
   const [textColor, setTextColor] = useState('#3A3030') // ใช้กับ title, ตัวอักษรรายการ, เส้นใต้, checkbox
+  const paperRef = useRef(null)
 
   useEffect(() => {
     const result = todoId ? getTodoFromCalendar(todoId) : null
@@ -89,8 +92,40 @@ function ToDoList() {
     setItems(items.filter((item) => item.id !== id))
   }
 
-  const downloadAsPDF = () => {
-    alert('Download as PDF - In production, this would generate a PDF of the to-do list')
+  const downloadAsPDF = async () => {
+    if (!paperRef.current) return
+    setOpenMenu(null)
+    try {
+      const canvas = await html2canvas(paperRef.current, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: paperColor,
+        logging: false
+      })
+      const imgData = canvas.toDataURL('image/png')
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4'
+      })
+      const pageW = pdf.internal.pageSize.getWidth()
+      const pageH = pdf.internal.pageSize.getHeight()
+      const imgW = canvas.width
+      const imgH = canvas.height
+      const pxToMm = 0.264583
+      const margin = 10
+      let w = imgW * pxToMm
+      let h = imgH * pxToMm
+      const scale = Math.min((pageW - margin * 2) / w, (pageH - margin * 2) / h, 1)
+      w *= scale
+      h *= scale
+      pdf.addImage(imgData, 'PNG', (pageW - w) / 2, (pageH - h) / 2, w, h)
+      const safeName = (title || 'todo-list').replace(/[<>:"/\\|?*]/g, '').trim().slice(0, 60) || 'todo-list'
+      pdf.save(`${safeName}.pdf`)
+    } catch (err) {
+      console.error(err)
+      alert('ไม่สามารถสร้าง PDF ได้ กรุณาลองอีกครั้ง')
+    }
   }
 
   const shareAsLink = () => {
@@ -171,7 +206,7 @@ function ToDoList() {
       </div>
 
       <div className="todolist-container">
-        <div className="todolist-paper" style={{ backgroundColor: paperColor }}>
+        <div ref={paperRef} className="todolist-paper" style={{ backgroundColor: paperColor }}>
           {isEditingTitle ? (
             <input
               className="todolist-title-input"
