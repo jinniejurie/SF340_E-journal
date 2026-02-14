@@ -170,6 +170,67 @@
   font-weight: 600;
 }
 
+/* Success popup */
+.auth-popup-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 1rem;
+}
+
+.auth-popup {
+  background: #f6f1ea;
+  border-radius: 20px;
+  padding: 2rem;
+  max-width: 360px;
+  width: 100%;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.2);
+  text-align: center;
+}
+
+.auth-popup-title {
+  margin: 0 0 0.75rem;
+  font-size: 1.35rem;
+  font-family: 'Unbounded', system-ui, sans-serif;
+}
+
+.auth-popup-text {
+  margin: 0 0 1.5rem;
+  font-size: 0.95rem;
+  color: #6d6460;
+}
+
+.auth-popup-btn {
+  width: 100%;
+  padding: 0.75rem 1.25rem;
+  border-radius: 999px;
+  border: none;
+  background-color: #3c3232;
+  color: #f7f4f1;
+  font-family: inherit;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.auth-popup-btn:hover {
+  background-color: #2f2626;
+}
+
+/* Auth loading (protected route) */
+.auth-loading {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  color: #6d6460;
+}
+
 @media (max-width: 900px) {
   .auth-page {
     padding: 1.8rem 1.2rem;
