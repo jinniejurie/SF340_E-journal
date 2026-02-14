@@ -594,15 +594,24 @@ function Calendar() {
                 {/* Existing Notes List */}
                 <div className="notes-list">
                   {getDayNotes(selectedDay).map(note => (
-                    <div key={note.id} className="note-item">
+                    <div
+                      key={note.id}
+                      className="note-item"
+                      role={note.type === 'todo' ? 'button' : undefined}
+                      onClick={note.type === 'todo' ? () => {
+                        navigate(`/calendar/toDoList?todoId=${note.id}`)
+                        closeDayModal()
+                      } : undefined}
+                      style={note.type === 'todo' ? { cursor: 'pointer' } : undefined}
+                    >
                       <div 
                         className="note-color-indicator" 
-                        style={{ backgroundColor: note.type === 'todo' ? note.color : note.tag.color }}
+                        style={{ backgroundColor: note.type === 'todo' ? note.color : note.tag?.color }}
                       />
                       <div className="note-content">
                         <div className="note-name">{note.name}</div>
                         <div className="note-meta">
-                          {note.type === 'todo' ? 'To-do List' : note.tag.name}
+                          {note.type === 'todo' ? 'To-do List' : note.tag?.name}
                           {note.emotion && ` • ${emotions.find(e => e.id === note.emotion)?.emoji}`}
                         </div>
                       </div>
