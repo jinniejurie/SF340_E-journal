@@ -313,6 +313,8 @@ function Calendar() {
       }))
       
       closeDayModal()
+      // Navigate to note page after saving
+      navigate('/calendar/note')
     } else if (noteType === 'todo' && noteName.trim()) {
       const dateKey = `${currentYear}-${currentDate.getMonth() + 1}-${selectedDay}`
       const newTodo = {
