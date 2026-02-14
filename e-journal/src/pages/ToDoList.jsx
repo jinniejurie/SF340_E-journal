@@ -3,6 +3,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { ChevronLeft, Download, Share2, Palette, Plus } from 'lucide-react'
 import html2canvas from 'html2canvas'
 import { jsPDF } from 'jspdf'
+import { auth } from '../services/firebase'
+import { getTodoFromFirestore, saveTodoToFirestore } from '../services/todoService'
 import '../styles/ToDoList.css'
 
 const getTodoFromCalendar = (todoId) => {
@@ -38,6 +40,29 @@ const updateCalendarTodoName = (todoId, newName) => {
   } catch (e) {}
 }
 
+const TODO_STORAGE_KEY = (id) => `ejournal-todo-${id ?? 'draft'}`
+
+function getTodoFromLocalStorage(storageKey) {
+  try {
+    const raw = localStorage.getItem(TODO_STORAGE_KEY(storageKey))
+    if (!raw) return null
+    const data = JSON.parse(raw)
+    return {
+      title: data.title ?? '',
+      items: Array.isArray(data.items) ? data.items : [],
+      paperColor: data.paperColor ?? '#F7F7F7',
+      textColor: data.textColor ?? '#3A3030'
+    }
+  } catch (e) {}
+  return null
+}
+
+function saveTodoToLocalStorage(storageKey, payload) {
+  try {
+    localStorage.setItem(TODO_STORAGE_KEY(storageKey), JSON.stringify(payload))
+  } catch (e) {}
+}
+
 function ToDoList() {
   const [searchParams] = useSearchParams()
   const todoId = searchParams.get('todoId')
@@ -54,8 +79,16 @@ function ToDoList() {
   const [openMenu, setOpenMenu] = useState(null) // 'customize' | 'share' | null
 
   const [paperColor, setPaperColor] = useState('#F7F7F7')
-  const [textColor, setTextColor] = useState('#3A3030') // ใช้กับ title, ตัวอักษรรายการ, เส้นใต้, checkbox
+  const [textColor, setTextColor] = useState('#3A3030')
+  const [loading, setLoading] = useState(false)
   const paperRef = useRef(null)
+  const stateRef = useRef({ title, items, paperColor, textColor })
+  const saveEffectRunCount = useRef(0)
+
+  const dateKey = calendarTodoResult?.dateKey ?? null
+  const storageKey = todoId ?? 'draft'
+
+  stateRef.current = { title, items, paperColor, textColor }
 
   useEffect(() => {
     const result = todoId ? getTodoFromCalendar(todoId) : null
@@ -63,6 +96,69 @@ function ToDoList() {
       setTitle(result.todo.name)
     }
   }, [todoId])
+
+  // โหลดครั้งเดียวตอนเข้า (localStorage ก่อน แล้วค่อย Firestore ถ้ามี)
+  useEffect(() => {
+    setLoading(true)
+    let cancelled = false
+    const key = todoId ?? 'draft'
+
+    const applyLoaded = (data) => {
+      if (!data) return
+      if (data.title !== undefined) setTitle(data.title)
+      if (Array.isArray(data.items)) setItems(data.items)
+      if (data.paperColor) setPaperColor(data.paperColor)
+      if (data.textColor) setTextColor(data.textColor)
+    }
+
+    const fromLocal = getTodoFromLocalStorage(key)
+    if (fromLocal) applyLoaded(fromLocal)
+
+    if (auth?.currentUser && todoId) {
+      getTodoFromFirestore(todoId)
+        .then((data) => {
+          if (cancelled) return
+          if (data) applyLoaded(data)
+        })
+        .catch(() => {})
+        .finally(() => { if (!cancelled) setLoading(false) })
+    } else {
+      setLoading(false)
+    }
+    return () => { cancelled = true }
+  }, [todoId])
+
+  // บันทึกทุกครั้งที่ state เปลี่ยน (เหมือนโน้ต – พิมพ์แล้วมีเก็บไว้เลย)
+  // รอบแรกไม่บันทึก เพื่อไม่ให้เขียนทับข้อมูลที่เพิ่งโหลดจาก localStorage
+  useEffect(() => {
+    saveEffectRunCount.current += 1
+    if (saveEffectRunCount.current <= 1) return
+    const payload = {
+      dateKey: dateKey ?? undefined,
+      title,
+      items,
+      paperColor,
+      textColor
+    }
+    saveTodoToLocalStorage(storageKey, payload)
+    if (auth?.currentUser && todoId && dateKey) {
+      saveTodoToFirestore(todoId, payload).catch(() => {})
+    }
+  }, [storageKey, dateKey, title, items, paperColor, textColor])
+
+  const saveToDb = (payload) => {
+    const full = {
+      dateKey: dateKey ?? undefined,
+      title: payload?.title ?? title,
+      items: payload?.items ?? items,
+      paperColor: payload?.paperColor ?? paperColor,
+      textColor: payload?.textColor ?? textColor
+    }
+    saveTodoToLocalStorage(storageKey, full)
+    if (auth?.currentUser && todoId && dateKey) {
+      saveTodoToFirestore(todoId, full).catch(() => {})
+    }
+  }
 
   const openCustomize = () => setOpenMenu((m) => (m === 'customize' ? null : 'customize'))
   const openShare = () => setOpenMenu((m) => (m === 'share' ? null : 'share'))
@@ -138,6 +234,11 @@ function ToDoList() {
 
   return (
     <div className="todolist-page">
+      {loading && (
+        <div className="todolist-loading" aria-hidden="true">
+          กำลังโหลด...
+        </div>
+      )}
       <div className="todolist-navbar">
         <button
           className="todolist-nav-btn"
@@ -164,7 +265,11 @@ function ToDoList() {
                     <input
                       type="color"
                       value={paperColor}
-                      onChange={(e) => setPaperColor(e.target.value)}
+                      onChange={(e) => {
+                        const v = e.target.value
+                        setPaperColor(v)
+                        saveToDb({ paperColor: v })
+                      }}
                     />
                     <span>{paperColor}</span>
                   </div>
@@ -175,7 +280,11 @@ function ToDoList() {
                     <input
                       type="color"
                       value={textColor}
-                      onChange={(e) => setTextColor(e.target.value)}
+                      onChange={(e) => {
+                        const v = e.target.value
+                        setTextColor(v)
+                        saveToDb({ textColor: v })
+                      }}
                     />
                     <span>{textColor}</span>
                   </div>
@@ -215,6 +324,7 @@ function ToDoList() {
               onBlur={() => {
                 setIsEditingTitle(false)
                 if (todoId) updateCalendarTodoName(todoId, title)
+                saveToDb({ title })
               }}
               autoFocus
               style={{ color: textColor }}
@@ -255,6 +365,7 @@ function ToDoList() {
                     className={`todolist-item-input ${item.completed ? 'completed' : ''}`}
                     value={item.text}
                     onChange={(e) => updateItemText(item.id, e.target.value)}
+                    onBlur={() => {}}
                     placeholder="Type your task..."
                     style={{
                       borderBottomColor: textColor,

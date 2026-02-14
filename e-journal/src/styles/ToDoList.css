@@ -4,6 +4,19 @@
   font-family: 'Unbounded', system-ui, sans-serif;
 }
 
+.todolist-loading {
+  position: fixed;
+  top: 70px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #3A3030;
+  color: #fff;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  z-index: 200;
+}
+
 .todolist-navbar {
   background-color: #F7F7F7;
   height: 60px;
