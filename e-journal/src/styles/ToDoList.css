@@ -1,0 +1,322 @@
+.todolist-page {
+  min-height: 100vh;
+  background-color: #E9E9E9;
+  font-family: 'Unbounded', system-ui, sans-serif;
+}
+
+.todolist-navbar {
+  background-color: #F7F7F7;
+  height: 60px;
+  padding: 0 2rem;
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+  box-shadow: 0px 2px 2px 0px rgba(0, 0, 0, 0.1);
+  border-radius: 0 0 20px 20px;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.todolist-nav-btn {
+  background: none;
+  border: none;
+  padding: 0.5rem;
+  cursor: pointer;
+  color: #3A3030;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+}
+
+.todolist-nav-btn:hover:not(:disabled) {
+  background-color: rgba(58, 48, 48, 0.1);
+}
+
+.todolist-nav-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.todolist-nav-controls {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  margin-left: auto;
+}
+
+.todolist-nav-divider {
+  width: 1px;
+  height: 35px;
+  background-color: #D3D3D3;
+  opacity: 0.8;
+}
+
+.todolist-nav-dropdown {
+  position: relative;
+}
+
+.todolist-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  padding: 0.5rem;
+  min-width: 150px;
+  z-index: 1000;
+}
+
+.todolist-dropdown-menu button {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  color: #3A3030;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.todolist-dropdown-menu button:hover {
+  background-color: rgba(58, 48, 48, 0.05);
+}
+
+.todolist-menu-small .customize-section label,
+.todolist-menu-small.todolist-dropdown-menu button,
+.todolist-menu-small .color-picker-row span {
+  font-size: 0.75rem;
+}
+
+.todolist-customize-menu {
+  min-width: 250px;
+  padding: 1rem;
+}
+
+.customize-section {
+  margin-bottom: 1rem;
+}
+
+.customize-section:last-child {
+  margin-bottom: 0;
+}
+
+.customize-section label {
+  display: block;
+  font-size: 0.85rem;
+  color: #666;
+  margin-bottom: 0.5rem;
+}
+
+.color-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.color-picker-row input[type="color"] {
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.color-picker-row span {
+  font-size: 0.9rem;
+  color: #3A3030;
+  font-family: monospace;
+}
+
+.todolist-container {
+  display: flex;
+  justify-content: center;
+  padding: 3rem;
+  min-height: calc(100vh - 60px);
+}
+
+.todolist-paper {
+  background-color: #F7F7F7;
+  width: 100%;
+  max-width: 700px;
+  min-height: 600px;
+  padding: 3rem 2.5rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  border-radius: 4px;
+}
+
+.todolist-title {
+  font-family: 'Unbounded', system-ui, sans-serif;
+  font-size: 1.5rem;
+  color: #3A3030;
+  margin: 0 0 2rem 0;
+  cursor: pointer;
+  padding: 0.5rem;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+}
+
+.todolist-title:hover {
+  background-color: rgba(58, 48, 48, 0.05);
+}
+
+.todolist-title-input {
+  font-family: 'Unbounded', system-ui, sans-serif;
+  font-size: 1.5rem;
+  color: #3A3030;
+  background: none;
+  border: none;
+  padding: 0.5rem;
+  width: 100%;
+  outline: 2px solid #B593C2;
+  border-radius: 4px;
+  margin-bottom: 2rem;
+}
+
+.todolist-items {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.todolist-item {
+  position: relative;
+}
+
+.todolist-item-content {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.5rem 0;
+}
+
+.todolist-checkbox {
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  border: 2px solid #3A3030;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.todolist-checkbox:hover {
+  transform: scale(1.1);
+}
+
+.todolist-item-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid #3A3030;
+  padding: 0.5rem 0.25rem;
+  font-family: 'Unbounded', system-ui, sans-serif;
+  font-size: 1rem;
+  color: #3A3030;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.todolist-item-input:focus {
+  border-bottom-color: currentColor;
+  border-bottom-width: 3px;
+}
+
+.todolist-item-input.completed {
+  opacity: 0.6;
+}
+
+.todolist-delete-btn {
+  background: none;
+  border: none;
+  color: #999;
+  font-size: 1.5rem;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  opacity: 0;
+  transition: all 0.2s;
+}
+
+.todolist-item:hover .todolist-delete-btn {
+  opacity: 1;
+}
+
+.todolist-delete-btn:hover {
+  color: #FF6B6B;
+  transform: scale(1.2);
+}
+
+.todolist-add-btn {
+  margin-top: 1rem;
+  border: none;
+  padding: 0.6rem 1rem;
+  border-radius: 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: 'Unbounded', system-ui, sans-serif;
+  font-size: 0.875rem;
+  transition: all 0.2s;
+  box-shadow: 0px 2px 4px 0px rgba(0, 0, 0, 0.1);
+}
+
+.todolist-add-btn:hover {
+  filter: brightness(0.9);
+  transform: translateY(-1px);
+  box-shadow: 0px 3px 6px 0px rgba(0, 0, 0, 0.15);
+}
+
+.todolist-add-btn-circle {
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border-radius: 50%;
+  justify-content: center;
+  margin-top: 1rem;
+}
+
+.todolist-add-btn-circle span {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .todolist-navbar {
+    padding: 0 1rem;
+    gap: 1rem;
+  }
+
+  .todolist-nav-controls {
+    gap: 0.75rem;
+  }
+
+  .todolist-container {
+    padding: 1.5rem;
+  }
+
+  .todolist-paper {
+    padding: 2rem 1.5rem;
+  }
+
+  .todolist-version-history {
+    right: 1rem;
+    width: calc(100% - 2rem);
+  }
+
+  .todolist-delete-btn {
+    opacity: 1;
+  }
+}

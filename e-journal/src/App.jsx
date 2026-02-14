@@ -4,6 +4,7 @@ import Home from './pages/Home.jsx'
 import Login from './pages/Login.jsx'
 import Signup from './pages/Signup.jsx'
 import Calendar from './pages/Calendar.jsx'
+import ToDoList from './pages/ToDoList.jsx'
 
 function App() {
   return (
@@ -12,6 +13,7 @@ function App() {
       <Route path="/login" element={<Login />} />
       <Route path="/signup" element={<Signup />} />
       <Route path="/calendar" element={<Calendar />} />
+      <Route path="/calendar/toDoList" element={<ToDoList />} />
     </Routes>
   )
 }
