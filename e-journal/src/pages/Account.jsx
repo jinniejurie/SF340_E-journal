@@ -1,34 +1,85 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { doc, getDoc, updateDoc } from 'firebase/firestore'
+import { onAuthStateChanged } from 'firebase/auth'
+
 import '../styles/Calendar.css'
 import '../styles/Account.css'
+import { auth, db } from '../services/firebase'
+import { updateUserEmail, reauthenticateWithPassword } from '../services/authService'
+
+const defaultBirthday = { day: '', month: '', year: '' }
+
+function accountDataFromDoc(data) {
+  if (!data) return null
+  const birthday = data.birthday && typeof data.birthday === 'object'
+    ? {
+        day: String(data.birthday.day ?? ''),
+        month: String(data.birthday.month ?? ''),
+        year: String(data.birthday.year ?? ''),
+      }
+    : defaultBirthday
+  return {
+    username: String(data.username ?? ''),
+    email: String(data.email ?? ''),
+    profileImage: String(data.profileImage ?? ''),
+    birthday,
+  }
+}
 
 function Account() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
   const navigate = useNavigate()
-  const [isEditMode, setIsEditMode] = useState(false)
-  const [profileImage, setProfileImage] = useState('')
-  const [formData, setFormData] = useState({
-    username: 'King_Kylie',
-    birthday: '01/11/2011',
-    email: 'KingKongKung@gmail.com',
-    address: '1412 Beanie, LA'
-  })
-  const [tempFormData, setTempFormData] = useState(formData)
+  const [user, setUser] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
 
-  // Load profile from localStorage on mount
+  const [isEditMode, setIsEditMode] = useState(false)
+  const [formData, setFormData] = useState({
+    username: '',
+    email: '',
+    profileImage: '',
+    birthday: { ...defaultBirthday },
+  })
+  const [tempFormData, setTempFormData] = useState({ ...formData })
+  const [passwordForEmailChange, setPasswordForEmailChange] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [message, setMessage] = useState({ text: '', type: '' }) // type: 'success' | 'error'
+
+  // Auth state and fetch USER document
   useEffect(() => {
-    const savedProfile = localStorage.getItem('ejournal-profile')
-    if (savedProfile) {
-      try {
-        const profile = JSON.parse(savedProfile)
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setFormData(profile)
-        setProfileImage(profile.profileImage || '')
-      } catch (e) {
-        console.error('Error loading profile:', e)
-      }
+    if (!auth || !db) {
+      setLoadError('Firebase is not configured.')
+      setLoading(false)
+      return
     }
+
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (!firebaseUser) {
+        setLoading(false)
+        return
+      }
+      setUser(firebaseUser)
+      setLoadError('')
+      try {
+        const userDoc = await getDoc(doc(db, 'USER', firebaseUser.uid))
+        const data = accountDataFromDoc(userDoc.exists() ? userDoc.data() : null)
+        const initial = data || {
+          username: '',
+          email: firebaseUser.email ?? '',
+          profileImage: '',
+          birthday: { ...defaultBirthday },
+        }
+        setFormData(initial)
+        setTempFormData(initial)
+      } catch (err) {
+        setLoadError(err.message || 'Failed to load profile.')
+      } finally {
+        setLoading(false)
+      }
+    })
+
+    return () => unsubscribe()
   }, [])
 
   const handleImageUpload = (e) => {
@@ -36,7 +87,7 @@ function Account() {
     if (file) {
       const reader = new FileReader()
       reader.onloadend = () => {
-        setProfileImage(reader.result)
+        setTempFormData(prev => ({ ...prev, profileImage: reader.result }))
       }
       reader.readAsDataURL(file)
     }
@@ -44,39 +95,154 @@ function Account() {
 
   const handleEditClick = () => {
     setIsEditMode(true)
-    setTempFormData(formData)
+    setTempFormData({
+      ...formData,
+      birthday: { ...formData.birthday },
+    })
+    setPasswordForEmailChange('')
+    setMessage({ text: '', type: '' })
   }
 
   const handleInputChange = (field, value) => {
     setTempFormData(prev => ({
       ...prev,
-      [field]: value
+      [field]: value,
     }))
   }
 
-  const handleSave = () => {
-    const updatedProfile = {
-      ...tempFormData,
-      profileImage
+  const handleBirthdayChange = (part, value) => {
+    setTempFormData(prev => ({
+      ...prev,
+      birthday: { ...prev.birthday, [part]: value },
+    }))
+  }
+
+  const validate = () => {
+    const u = tempFormData.username?.trim()
+    if (!u) {
+      setMessage({ text: 'Username cannot be empty.', type: 'error' })
+      return false
     }
-    setFormData(updatedProfile)
-    localStorage.setItem('ejournal-profile', JSON.stringify(updatedProfile))
-    setIsEditMode(false)
+    const email = tempFormData.email?.trim()
+    if (!email) {
+      setMessage({ text: 'Email cannot be empty.', type: 'error' })
+      return false
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!emailRegex.test(email)) {
+      setMessage({ text: 'Please enter a valid email address.', type: 'error' })
+      return false
+    }
+    const { day, month, year } = tempFormData.birthday || defaultBirthday
+    if (!day?.trim() || !month?.trim() || !year?.trim()) {
+      setMessage({ text: 'Please fill in day, month, and year for birthday.', type: 'error' })
+      return false
+    }
+    const emailChanged = email !== formData.email
+    if (emailChanged && !passwordForEmailChange?.trim()) {
+      setMessage({ text: 'Please enter your current password to change your email.', type: 'error' })
+      return false
+    }
+    return true
+  }
+
+  const handleSave = async () => {
+    setMessage({ text: '', type: '' })
+    if (!validate()) return
+    if (!user || !auth || !db) return
+
+    setSaving(true)
+    const emailChanged = tempFormData.email?.trim() !== formData.email
+    const newEmail = tempFormData.email?.trim()
+    const newUsername = tempFormData.username?.trim()
+    const newBirthday = {
+      day: String(tempFormData.birthday?.day ?? '').trim(),
+      month: String(tempFormData.birthday?.month ?? '').trim(),
+      year: String(tempFormData.birthday?.year ?? '').trim(),
+    }
+    const newProfileImage = tempFormData.profileImage ?? ''
+
+    try {
+      if (emailChanged) {
+        await reauthenticateWithPassword(user, formData.email, passwordForEmailChange)
+        await updateUserEmail(user, newEmail)
+      }
+
+      await updateDoc(doc(db, 'USER', user.uid), {
+        username: newUsername,
+        email: newEmail,
+        profileImage: newProfileImage,
+        birthday: newBirthday,
+      })
+
+      const updated = {
+        username: newUsername,
+        email: newEmail,
+        profileImage: newProfileImage,
+        birthday: { ...newBirthday },
+      }
+      setFormData(updated)
+      setTempFormData(updated)
+      setPasswordForEmailChange('')
+      setIsEditMode(false)
+      setMessage({ text: 'Profile updated successfully.', type: 'success' })
+    } catch (err) {
+      const msg = err.message || 'Failed to update profile.'
+      const code = err.code || ''
+      if (code === 'auth/invalid-credential' || code === 'auth/wrong-password') {
+        setMessage({ text: 'Current password is incorrect.', type: 'error' })
+      } else if (code === 'auth/email-already-in-use') {
+        setMessage({ text: 'This email is already in use by another account.', type: 'error' })
+      } else if (code === 'auth/requires-recent-login') {
+        setMessage({ text: 'Please enter your current password to change your email.', type: 'error' })
+      } else {
+        setMessage({ text: msg, type: 'error' })
+      }
+    } finally {
+      setSaving(false)
+    }
   }
 
   const handleCancel = () => {
     setIsEditMode(false)
-    setTempFormData(formData)
+    setTempFormData({
+      ...formData,
+      birthday: { ...formData.birthday },
+    })
+    setPasswordForEmailChange('')
+    setMessage({ text: '', type: '' })
   }
 
   const toggleSidebar = () => {
     setIsSidebarOpen(prev => !prev)
   }
 
+  const birthdayDisplay = formData.birthday?.day && formData.birthday?.month && formData.birthday?.year
+    ? `${formData.birthday.day}/${formData.birthday.month}/${formData.birthday.year}`
+    : '—'
+
+  if (loading) {
+    return (
+      <div className="calendar-page">
+        <main className="account-main">
+          <p className="account-message account-loading">Loading profile…</p>
+        </main>
+      </div>
+    )
+  }
+
+  if (loadError || !user) {
+    return (
+      <div className="calendar-page">
+        <main className="account-main">
+          <p className="account-message account-error">{loadError || 'You must be logged in to view this page.'}</p>
+        </main>
+      </div>
+    )
+  }
+
   return (
     <div className={`calendar-page ${isSidebarOpen ? 'calendar-page--with-sidebar' : ''}`}>
-      
-      {/* Toggle Sidebar Button */}
       <button
         className="calendar-nav-btn"
         aria-label="Toggle menu"
@@ -89,7 +255,6 @@ function Account() {
         </svg>
       </button>
 
-      {/* Sidebar */}
       <div className={`calendar-sidebar ${isSidebarOpen ? 'calendar-sidebar--open' : ''}`}>
         <button
           className="calendar-sidebar-close-btn"
@@ -99,35 +264,20 @@ function Account() {
         >
           «
         </button>
-
         <div className="calendar-sidebar-header">ejournal</div>
-
         <nav className="calendar-sidebar-nav" aria-label="Account navigation">
-
-          {/* Account (active) */}
-          <button
-            type="button"
-            className="calendar-sidebar-link calendar-sidebar-link--active"
-          >
+          <button type="button" className="calendar-sidebar-link calendar-sidebar-link--active">
             <span className="calendar-sidebar-link-icon">
               <svg width="22" height="22" viewBox="0 0 24 24">
-                <path
-                  d="M12 12c1.66 0 3-1.34 3-3S13.66 6 12 6s-3 1.34-3 3 1.34 3 3 3Zm0 2c-2.33 0-7 1.17-7 3.5V19c0 1.1.9 2 2 2h10a2 2 0 0 0 2-2v-1.5C19 15.17 14.33 14 12 14Z"
-                  fill="currentColor"
-                />
+                <path d="M12 12c1.66 0 3-1.34 3-3S13.66 6 12 6s-3 1.34-3 3 1.34 3 3 3Zm0 2c-2.33 0-7 1.17-7 3.5V19c0 1.1.9 2 2 2h10a2 2 0 0 0 2-2v-1.5C19 15.17 14.33 14 12 14Z" fill="currentColor" />
               </svg>
             </span>
             <span className="calendar-sidebar-link-label">Account</span>
           </button>
-
-          {/* Home */}
           <button
             type="button"
             className="calendar-sidebar-link"
-            onClick={() => {
-              navigate('/')
-              setIsSidebarOpen(false)
-            }}
+            onClick={() => { navigate('/'); setIsSidebarOpen(false); }}
           >
             <span className="calendar-sidebar-link-icon">
               <svg width="22" height="22" viewBox="0 0 24 24">
@@ -136,8 +286,6 @@ function Account() {
             </span>
             <span className="calendar-sidebar-link-label">Home</span>
           </button>
-
-          {/* Search */}
           <button type="button" className="calendar-sidebar-link calendar-sidebar-link--accent">
             <span className="calendar-sidebar-link-icon">
               <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -146,15 +294,10 @@ function Account() {
             </span>
             <span className="calendar-sidebar-link-label">Search</span>
           </button>
-
-          {/* Logout */}
           <button type="button" className="calendar-sidebar-link">
             <span className="calendar-sidebar-link-icon">
               <svg width="22" height="22" viewBox="0 0 24 24">
-                <path
-                  d="M6 5h7v2H6v10h7v2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Zm9.59 3.59L18.17 11H11v2h7.17l-2.58 2.59L17 17l5-5-5-5-1.41 1.59Z"
-                  fill="currentColor"
-                />
+                <path d="M6 5h7v2H6v10h7v2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Zm9.59 3.59L18.17 11H11v2h7.17l-2.58 2.59L17 17l5-5-5-5-1.41 1.59Z" fill="currentColor" />
               </svg>
             </span>
             <span className="calendar-sidebar-link-label">Logout</span>
@@ -162,105 +305,130 @@ function Account() {
         </nav>
       </div>
 
-        {/* Main */}
-        <main className="account-main">
-            <div className="account-header">
-            <h1 className="account-title">Profile</h1>
-            {!isEditMode && (
-              <button className="account-edit-btn" onClick={handleEditClick}>✏️</button>
-            )}
+      <main className="account-main">
+        <div className="account-header">
+          <h1 className="account-title">Profile</h1>
+          {!isEditMode && (
+            <button className="account-edit-btn" onClick={handleEditClick} type="button">✏️</button>
+          )}
+        </div>
+
+        {message.text && (
+          <p className={`account-message account-message--${message.type}`} role="alert">
+            {message.text}
+          </p>
+        )}
+
+        {!isEditMode ? (
+          <div className="account-body">
+            <div className="account-avatar">
+              <img
+                src={formData.profileImage || 'https://dummyimage.com/160x160/cccccc/ffffff&text=Profile'}
+                alt="Profile"
+              />
+            </div>
+            <div className="account-info">
+              <p><span>Username:</span> {formData.username || '—'}</p>
+              <p><span>Birthday:</span> {birthdayDisplay}</p>
+              <p><span>Email:</span> {formData.email || '—'}</p>
+            </div>
+          </div>
+        ) : (
+          <div className="account-edit-form">
+            <div className="form-section">
+              <h3>Profile Picture</h3>
+              <div className="profile-image-upload">
+                <img
+                  src={tempFormData.profileImage || 'https://dummyimage.com/160x160/cccccc/ffffff&text=Profile'}
+                  alt="Profile preview"
+                  className="profile-preview"
+                />
+                <label className="upload-btn">
+                  📤 Upload Image
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleImageUpload}
+                    style={{ display: 'none' }}
+                  />
+                </label>
+              </div>
             </div>
 
-            {!isEditMode ? (
-              // View Mode
-              <div className="account-body">
-                <div className="account-avatar">
-                  <img
-                    src={profileImage || "https://dummyimage.com/160x160/cccccc/ffffff&text=Profile"}
-                    alt="profile"
+            <div className="form-section">
+              <h3>Personal Information</h3>
+              <div className="form-group">
+                <label>Username</label>
+                <input
+                  type="text"
+                  value={tempFormData.username}
+                  onChange={(e) => handleInputChange('username', e.target.value)}
+                  placeholder="Enter username"
+                />
+              </div>
+
+              <div className="form-group">
+                <label>Birthday</label>
+                <div className="account-birthday-fields">
+                  <input
+                    type="text"
+                    value={tempFormData.birthday?.day ?? ''}
+                    onChange={(e) => handleBirthdayChange('day', e.target.value)}
+                    placeholder="Day"
+                    aria-label="Birthday day"
+                  />
+                  <input
+                    type="text"
+                    value={tempFormData.birthday?.month ?? ''}
+                    onChange={(e) => handleBirthdayChange('month', e.target.value)}
+                    placeholder="Month"
+                    aria-label="Birthday month"
+                  />
+                  <input
+                    type="text"
+                    value={tempFormData.birthday?.year ?? ''}
+                    onChange={(e) => handleBirthdayChange('year', e.target.value)}
+                    placeholder="Year"
+                    aria-label="Birthday year"
                   />
                 </div>
-
-                <div className="account-info">
-                  <p><span>Username:</span> {formData.username}</p>
-                  <p><span>Birthday:</span> {formData.birthday}</p>
-                  <p><span>Email:</span> {formData.email}</p>
-                  <p><span>Address:</span> {formData.address}</p>
-                </div>
               </div>
-            ) : (
-              // Edit Mode
-              <div className="account-edit-form">
-                <div className="form-section">
-                  <h3>Profile Picture</h3>
-                  <div className="profile-image-upload">
-                    <img
-                      src={profileImage || "https://dummyimage.com/160x160/cccccc/ffffff&text=Profile"}
-                      alt="profile preview"
-                      className="profile-preview"
-                    />
-                    <label className="upload-btn">
-                      📤 Upload Image
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={handleImageUpload}
-                        style={{ display: 'none' }}
-                      />
-                    </label>
-                  </div>
-                </div>
 
-                <div className="form-section">
-                  <h3>Personal Information</h3>
-                  <div className="form-group">
-                    <label>Username</label>
-                    <input
-                      type="text"
-                      value={tempFormData.username}
-                      onChange={(e) => handleInputChange('username', e.target.value)}
-                      placeholder="Enter username"
-                    />
-                  </div>
-
-                  <div className="form-group">
-                    <label>Birthday</label>
-                    <input
-                      type="text"
-                      value={tempFormData.birthday}
-                      onChange={(e) => handleInputChange('birthday', e.target.value)}
-                      placeholder="DD/MM/YYYY"
-                    />
-                  </div>
-
-                  <div className="form-group">
-                    <label>Email</label>
-                    <input
-                      type="email"
-                      value={tempFormData.email}
-                      onChange={(e) => handleInputChange('email', e.target.value)}
-                      placeholder="Enter email"
-                    />
-                  </div>
-
-                  <div className="form-group">
-                    <label>Address</label>
-                    <textarea
-                      value={tempFormData.address}
-                      onChange={(e) => handleInputChange('address', e.target.value)}
-                      placeholder="Enter address"
-                      rows="3"
-                    />
-                  </div>
-                </div>
-
-                <div className="form-actions">
-                  <button className="btn-save" onClick={handleSave}>💾 Save</button>
-                  <button className="btn-cancel" onClick={handleCancel}>❌ Cancel</button>
-                </div>
+              <div className="form-group">
+                <label>Email</label>
+                <input
+                  type="email"
+                  value={tempFormData.email}
+                  onChange={(e) => handleInputChange('email', e.target.value)}
+                  placeholder="Enter email"
+                />
               </div>
-            )}
-        </main>
+
+              {tempFormData.email?.trim() !== formData.email && (
+                <div className="form-group">
+                  <label>Current password (required to change email)</label>
+                  <input
+                    type="password"
+                    value={passwordForEmailChange}
+                    onChange={(e) => setPasswordForEmailChange(e.target.value)}
+                    placeholder="Enter your current password"
+                    autoComplete="current-password"
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="form-actions">
+              <button type="button" className="btn-save" onClick={handleSave} disabled={saving}>
+                {saving ? 'Saving…' : '💾 Save'}
+              </button>
+              <button type="button" className="btn-cancel" onClick={handleCancel} disabled={saving}>
+                ❌ Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </main>
     </div>
   )
 }

@@ -73,6 +73,52 @@
   margin-right: 6px;
 }
 
+/* Messages */
+.account-message {
+  margin: 0 0 20px;
+  font-size: 14px;
+  padding: 10px 14px;
+  border-radius: 8px;
+}
+
+.account-message--success {
+  background-color: rgba(110, 204, 113, 0.2);
+  color: #2d6b2f;
+}
+
+.account-message--error {
+  background-color: rgba(255, 81, 68, 0.15);
+  color: #b3261e;
+}
+
+.account-loading,
+.account-error {
+  color: #6e5a5a;
+}
+
+/* Birthday fields (Day / Month / Year) */
+.account-birthday-fields {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.account-birthday-fields input {
+  padding: 10px 12px;
+  border: 1.5px solid #e0d5ce;
+  border-radius: 8px;
+  font-size: 14px;
+  font-family: inherit;
+  color: #555;
+  background-color: #ffffff;
+}
+
+.account-birthday-fields input:focus {
+  outline: none;
+  border-color: #e8b4b8;
+  box-shadow: 0 0 0 3px rgba(232, 180, 184, 0.1);
+}
+
 /* Edit Form */
 .account-edit-form {
   display: flex;
