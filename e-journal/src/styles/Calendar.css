@@ -92,6 +92,25 @@
   background-color: rgba(93, 75, 75, 0.08);
 }
 
+.calendar-sidebar-link--active {
+  background-color: rgba(93, 75, 75, 0.12);
+  color: var(--theme-color-3);
+  font-weight: 600;
+}
+
+.calendar-sidebar-link--active:hover {
+  background-color: rgba(93, 75, 75, 0.12);
+}
+
+.calendar-sidebar-link:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.calendar-sidebar-link:disabled:hover {
+  background-color: transparent;
+}
+
 .calendar-sidebar-link-icon {
   display: inline-flex;
   align-items: center;
@@ -104,6 +123,76 @@
 
 .calendar-sidebar-link--accent {
   color: #2aa3a2;
+}
+
+/* Logout confirmation popup (Navbar) */
+.nav-popup-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  z-index: 30;
+}
+
+.nav-popup {
+  background: var(--theme-color-1);
+  border-radius: 20px;
+  padding: 1.75rem 2rem 1.9rem;
+  max-width: 360px;
+  width: 100%;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+  text-align: center;
+}
+
+.nav-popup-title {
+  margin: 0 0 0.75rem;
+  font-family: 'Unbounded', -apple-system, Roboto, Helvetica, sans-serif;
+  font-size: 1.3rem;
+  color: var(--theme-color-2);
+}
+
+.nav-popup-text {
+  margin: 0 0 1.4rem;
+  font-size: 0.95rem;
+  color: var(--theme-color-2);
+  opacity: 0.85;
+}
+
+.nav-popup-actions {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.nav-popup-btn {
+  flex: 1;
+  padding: 0.65rem 1.1rem;
+  border-radius: 999px;
+  border: none;
+  font-size: 0.9rem;
+  font-family: 'Unbounded', -apple-system, Roboto, Helvetica, sans-serif;
+  cursor: pointer;
+}
+
+.nav-popup-btn--primary {
+  background: #3c3232;
+  color: #f7f4f1;
+}
+
+.nav-popup-btn--primary:hover {
+  background: #2f2626;
+}
+
+.nav-popup-btn--secondary {
+  background: transparent;
+  color: var(--theme-color-2);
+  border: 1px solid rgba(93, 75, 75, 0.35);
+}
+
+.nav-popup-btn--secondary:hover {
+  background: rgba(93, 75, 75, 0.08);
 }
 
 .calendar-nav-btn {
