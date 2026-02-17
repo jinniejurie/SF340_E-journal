@@ -310,8 +310,8 @@ function Calendar() {
       }))
       
       closeDayModal()
-      // Navigate to note page after saving
-      navigate('/calendar/note')
+      // Navigate to note page with noteId
+      navigate(`/calendar/note?noteId=${newNote.id}`)
     } else if (noteType === 'todo' && noteName.trim()) {
       const dateKey = `${currentYear}-${currentDate.getMonth() + 1}-${selectedDay}`
       const newTodo = {
@@ -541,12 +541,16 @@ function Calendar() {
                     <div
                       key={note.id}
                       className="note-item"
-                      role={note.type === 'todo' ? 'button' : undefined}
-                      onClick={note.type === 'todo' ? () => {
-                        navigate(`/calendar/toDoList?todoId=${note.id}`)
+                      role="button"
+                      onClick={() => {
+                        if (note.type === 'todo') {
+                          navigate(`/calendar/toDoList?todoId=${note.id}`)
+                        } else if (note.type === 'note') {
+                          navigate(`/calendar/note?noteId=${note.id}`)
+                        }
                         closeDayModal()
-                      } : undefined}
-                      style={note.type === 'todo' ? { cursor: 'pointer' } : undefined}
+                      }}
+                      style={{ cursor: 'pointer' }}
                     >
                       <div 
                         className="note-color-indicator" 

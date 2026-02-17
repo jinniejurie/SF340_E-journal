@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { useNavigate, useLocation } from 'react-router-dom'
+import { useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import { Resizable } from 're-resizable'
 import { 
   Type, 
@@ -7,8 +7,6 @@ import {
   Image as ImageIcon, 
   Download, 
   Share2, 
-  Undo2, 
-  Redo2, 
   ChevronLeft,
   Triangle,
   Star,
@@ -21,8 +19,12 @@ import {
   Scissors,
   Maximize2,
   ArrowDown,
-  ArrowUp
+  ArrowUp,
+  Undo2,
+  Redo2
 } from 'lucide-react'
+import { auth } from '../services/firebase'
+import { getNoteFromFirestore, saveNoteToFirestore } from '../services/noteService'
 import '../styles/Note.css'
 
 // Import sticker images
@@ -44,17 +46,45 @@ const STICKERS = [
   sticker10
 ]
 
+const NOTE_STORAGE_KEY = (id) => `ejournal-note-${id ?? 'draft'}`
+
+function getNoteFromLocalStorage(storageKey) {
+  try {
+    const raw = localStorage.getItem(NOTE_STORAGE_KEY(storageKey))
+    if (!raw) return null
+    const data = JSON.parse(raw)
+    return {
+      title: data.title ?? '',
+      tagName: data.tagName ?? '',
+      tagColor: data.tagColor ?? '#FF6B6B',
+      textBoxes: Array.isArray(data.textBoxes) ? data.textBoxes : [],
+      shapes: Array.isArray(data.shapes) ? data.shapes : [],
+      images: Array.isArray(data.images) ? data.images : [],
+      stickers: Array.isArray(data.stickers) ? data.stickers : [],
+      maxZIndex: typeof data.maxZIndex === 'number' ? data.maxZIndex : 1
+    }
+  } catch (e) {}
+  return null
+}
+
+function saveNoteToLocalStorage(storageKey, payload) {
+  try {
+    localStorage.setItem(NOTE_STORAGE_KEY(storageKey), JSON.stringify(payload))
+  } catch (e) {}
+}
+
 function Note() {
   const navigate = useNavigate()
   const location = useLocation()
+  const [searchParams] = useSearchParams()
+  const noteId = searchParams.get('noteId')
   
-  // Get the latest note from localStorage
+  // Get the latest note from localStorage (for backward compatibility)
   const getLatestNote = () => {
     try {
       const stored = localStorage.getItem('ejournal-notes')
       if (stored) {
         const notes = JSON.parse(stored)
-        // Get the most recent note
         const allNotes = Object.values(notes).flat()
         if (allNotes.length > 0) {
           const sortedNotes = allNotes.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
@@ -77,13 +107,13 @@ function Note() {
   const latestNote = getLatestNote()
   const tags = getTags()
   const noteTag = latestNote && latestNote.tag ? tags.find(t => t.id === latestNote.tag.id) || latestNote.tag : null
+  const storageKey = noteId ?? 'draft'
+  const dateKey = latestNote?.date ?? null
 
   const [title, setTitle] = useState(latestNote?.name || '23 January 2026')
   const [isEditingTitle, setIsEditingTitle] = useState(false)
   const [tagName, setTagName] = useState(noteTag?.name || '🪰 Aura Loss')
   const [tagColor, setTagColor] = useState(noteTag?.color || '#FF6B6B')
-  const [isEditingTag, setIsEditingTag] = useState(false)
-  const [isEditingTagColor, setIsEditingTagColor] = useState(false)
   const [showTagSelector, setShowTagSelector] = useState(false)
   const [isCreatingNewTag, setIsCreatingNewTag] = useState(false)
   const [newTagName, setNewTagName] = useState('')
@@ -95,14 +125,18 @@ function Note() {
   const [maxZIndex, setMaxZIndex] = useState(1)
   const [showShapesMenu, setShowShapesMenu] = useState(false)
   const [showStickersMenu, setShowStickersMenu] = useState(false)
-  const [showVersionHistory, setShowVersionHistory] = useState(false)
   const [showShareMenu, setShowShareMenu] = useState(false)
   const [isAddingTextBox, setIsAddingTextBox] = useState(false)
-  const [isSaved, setIsSaved] = useState(true)
-  const [versions, setVersions] = useState([])
-  const [currentVersionIndex, setCurrentVersionIndex] = useState(-1)
+  const [loading, setLoading] = useState(false)
   const [selectedItem, setSelectedItem] = useState(null)
+  const saveEnabledRef = useRef(false)
   const [showColorPicker, setShowColorPicker] = useState(false)
+  
+  // Undo/Redo history
+  const [history, setHistory] = useState([])
+  const [historyIndex, setHistoryIndex] = useState(-1)
+  const isRestoringRef = useRef(false)
+  const textChangeTimeoutRef = useRef(null)
   
   // Close menus when selecting different item type
   const handleSelectItem = (item) => {
@@ -138,20 +172,73 @@ function Note() {
   const activeDragHandlersRef = useRef({ mouseMove: null, mouseUp: null, contextMenu: null })
   const isRightClickRef = useRef(false)
 
-  // Sync with latest note and tags when component mounts or when notes/tags change
+  // โหลดจาก localStorage/Firestore ตอนเข้า
   useEffect(() => {
-    const latestNote = getLatestNote()
-    const tags = getTags()
-    const noteTag = latestNote && latestNote.tag ? tags.find(t => t.id === latestNote.tag.id) || latestNote.tag : null
-    
-    if (latestNote) {
-      setTitle(latestNote.name)
+    setLoading(true)
+    saveEnabledRef.current = false
+    let cancelled = false
+    let enableSaveTimer = null
+    const key = noteId ?? 'draft'
+
+    const applyLoaded = (data) => {
+      if (!data) return
+      if (data.title !== undefined) setTitle(data.title)
+      if (data.tagName !== undefined) setTagName(data.tagName)
+      if (data.tagColor !== undefined) setTagColor(data.tagColor)
+      if (Array.isArray(data.textBoxes)) setTextBoxes(data.textBoxes)
+      if (Array.isArray(data.shapes)) setShapes(data.shapes)
+      if (Array.isArray(data.images)) setImages(data.images)
+      if (Array.isArray(data.stickers)) setStickers(data.stickers)
+      if (typeof data.maxZIndex === 'number') setMaxZIndex(data.maxZIndex)
     }
-    if (noteTag) {
-      setTagName(noteTag.name)
-      setTagColor(noteTag.color)
+
+    const enableSave = () => {
+      enableSaveTimer = setTimeout(() => { saveEnabledRef.current = true }, 150)
     }
-  }, [location.pathname])
+
+    const fromLocal = getNoteFromLocalStorage(key)
+    if (fromLocal) applyLoaded(fromLocal)
+
+    if (auth?.currentUser && noteId) {
+      getNoteFromFirestore(noteId)
+        .then((data) => {
+          if (cancelled) return
+          if (data) applyLoaded(data)
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (!cancelled) setLoading(false)
+          enableSave()
+        })
+    } else {
+      setLoading(false)
+      enableSave()
+    }
+    return () => {
+      cancelled = true
+      if (enableSaveTimer) clearTimeout(enableSaveTimer)
+    }
+  }, [noteId])
+
+  // บันทึกอัตโนมัติทุกครั้งที่ state เปลี่ยน (หลังโหลดเสร็จ 150ms)
+  useEffect(() => {
+    if (!saveEnabledRef.current) return
+    const payload = {
+      dateKey: dateKey ?? undefined,
+      title,
+      tagName,
+      tagColor,
+      textBoxes,
+      shapes,
+      images,
+      stickers,
+      maxZIndex
+    }
+    saveNoteToLocalStorage(storageKey, payload)
+    if (auth?.currentUser && noteId && dateKey) {
+      saveNoteToFirestore(noteId, payload).catch(() => {})
+    }
+  }, [storageKey, dateKey, title, tagName, tagColor, textBoxes, shapes, images, stickers, maxZIndex])
 
   // Listen for storage changes to sync in real-time
   useEffect(() => {
@@ -177,9 +264,9 @@ function Note() {
     return () => window.removeEventListener('storage', handleStorageChange)
   }, [])
 
-  // Update note name in localStorage when title changes
+  // Update note name in calendar localStorage when title changes (sync with calendar)
   useEffect(() => {
-    if (latestNote) {
+    if (latestNote && noteId) {
       try {
         const stored = localStorage.getItem('ejournal-notes')
         if (stored) {
@@ -195,7 +282,80 @@ function Note() {
         }
       } catch (e) {}
     }
-  }, [title])
+  }, [title, latestNote, noteId])
+
+  // Undo/Redo functions
+  const saveToHistory = () => {
+    if (isRestoringRef.current) return
+    const snapshot = {
+      textBoxes: [...textBoxes],
+      shapes: [...shapes],
+      images: [...images],
+      stickers: [...stickers],
+      title,
+      tagName,
+      tagColor,
+      maxZIndex
+    }
+    setHistory(prev => {
+      const newHistory = prev.slice(0, historyIndex + 1)
+      newHistory.push(snapshot)
+      return newHistory.slice(-50) // เก็บแค่ 50 รายการล่าสุด
+    })
+    setHistoryIndex(prev => Math.min(prev + 1, 49))
+  }
+
+  const handleUndo = () => {
+    if (historyIndex > 0) {
+      isRestoringRef.current = true
+      const prevSnapshot = history[historyIndex - 1]
+      setTextBoxes(prevSnapshot.textBoxes)
+      setShapes(prevSnapshot.shapes)
+      setImages(prevSnapshot.images)
+      setStickers(prevSnapshot.stickers)
+      setTitle(prevSnapshot.title)
+      setTagName(prevSnapshot.tagName)
+      setTagColor(prevSnapshot.tagColor)
+      setMaxZIndex(prevSnapshot.maxZIndex)
+      setHistoryIndex(prev => prev - 1)
+      setTimeout(() => { isRestoringRef.current = false }, 100)
+    }
+  }
+
+  const handleRedo = () => {
+    if (historyIndex < history.length - 1) {
+      isRestoringRef.current = true
+      const nextSnapshot = history[historyIndex + 1]
+      setTextBoxes(nextSnapshot.textBoxes)
+      setShapes(nextSnapshot.shapes)
+      setImages(nextSnapshot.images)
+      setStickers(nextSnapshot.stickers)
+      setTitle(nextSnapshot.title)
+      setTagName(nextSnapshot.tagName)
+      setTagColor(nextSnapshot.tagColor)
+      setMaxZIndex(nextSnapshot.maxZIndex)
+      setHistoryIndex(prev => prev + 1)
+      setTimeout(() => { isRestoringRef.current = false }, 100)
+    }
+  }
+
+  // บันทึก history ตอนโหลดเสร็จ (initial state)
+  useEffect(() => {
+    if (!loading && saveEnabledRef.current && history.length === 0) {
+      const snapshot = {
+        textBoxes: [...textBoxes],
+        shapes: [...shapes],
+        images: [...images],
+        stickers: [...stickers],
+        title,
+        tagName,
+        tagColor,
+        maxZIndex
+      }
+      setHistory([snapshot])
+      setHistoryIndex(0)
+    }
+  }, [loading, textBoxes, shapes, images, stickers, title, tagName, tagColor, maxZIndex, history.length])
 
   // Update tag in localStorage when tag changes
   const updateTagInStorage = (newName, newColor) => {
@@ -269,6 +429,7 @@ function Note() {
       setNewTagColor('#FF6B6B')
       setIsCreatingNewTag(false)
       setShowTagSelector(false)
+      setTimeout(() => saveToHistory(), 50)
     }
   }
 
@@ -300,6 +461,7 @@ function Note() {
     setTagColor(tag.color)
     setShowTagSelector(false)
     setIsCreatingNewTag(false)
+    setTimeout(() => saveToHistory(), 50)
   }
 
   // Handle keyboard shortcuts
@@ -336,7 +498,7 @@ function Note() {
       const modifier = isMac ? e.metaKey : e.ctrlKey;
 
       // Delete/Backspace
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedItem && !isEditingTitle && !isEditingTag && !isEditingTagColor) {
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedItem && !isEditingTitle) {
         e.preventDefault()
         if (selectedItem.type === 'textbox') {
           deleteTextBox(selectedItem.id)
@@ -371,63 +533,8 @@ function Note() {
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [selectedItem, isEditingTitle, isEditingTag, isEditingTagColor, clipboard])
+  }, [selectedItem, isEditingTitle, clipboard])
 
-  const saveVersion = (description) => {
-    const newVersion = {
-      id: Date.now().toString(),
-      timestamp: new Date(),
-      description,
-      state: {
-        textBoxes: [...textBoxes],
-        shapes: [...shapes],
-        images: [...images],
-        stickers: [...stickers],
-        title,
-        tagName,
-        tagColor
-      }
-    };
-    
-    const newVersions = [...versions.slice(0, currentVersionIndex + 1), newVersion];
-    setVersions(newVersions);
-    setCurrentVersionIndex(newVersions.length - 1);
-    setIsSaved(true);
-  };
-
-  const handleSave = () => {
-    // Save current state as a version if there are unsaved changes
-    if (!isSaved) {
-      saveVersion('Manual save');
-    }
-    // Navigate to /calendar/note
-    navigate('/calendar/note');
-  };
-
-  const restoreVersion = (index) => {
-    const version = versions[index];
-    setTextBoxes(version.state.textBoxes);
-    setShapes(version.state.shapes);
-    setImages(version.state.images);
-    setStickers(version.state.stickers);
-    setTitle(version.state.title);
-    setTagName(version.state.tagName || version.state.tag || '');
-    setTagColor(version.state.tagColor || '#FF6B6B');
-    setCurrentVersionIndex(index);
-    setIsSaved(true);
-  };
-
-  const handleUndo = () => {
-    if (currentVersionIndex > 0) {
-      restoreVersion(currentVersionIndex - 1);
-    }
-  };
-
-  const handleRedo = () => {
-    if (currentVersionIndex < versions.length - 1) {
-      restoreVersion(currentVersionIndex + 1);
-    }
-  };
 
   const handleCanvasClick = (e) => {
     // Deselect when clicking on canvas (not on any element)
@@ -461,8 +568,7 @@ function Note() {
     setTextBoxes([...textBoxes, newTextBox]);
     handleSelectItem({ type: 'textbox', id: newTextBoxId });
     setIsAddingTextBox(false);
-    setIsSaved(false);
-    saveVersion('Added text box');
+    setTimeout(() => saveToHistory(), 50)
   };
 
   const addShape = (type, clickX = null, clickY = null) => {
@@ -494,8 +600,7 @@ function Note() {
     setShapes([...shapes, newShape]);
     handleSelectItem({ type: 'shape', id: newShape.id });
     setShowShapesMenu(false);
-    setIsSaved(false);
-    saveVersion(`Added ${type} shape`);
+    setTimeout(() => saveToHistory(), 50)
   };
 
   const addSticker = (stickerSrc, clickX = null, clickY = null) => {
@@ -525,8 +630,7 @@ function Note() {
     setStickers([...stickers, newSticker]);
     handleSelectItem({ type: 'sticker', id: newSticker.id });
     setShowStickersMenu(false);
-    setIsSaved(false);
-    saveVersion('Added sticker');
+    setTimeout(() => saveToHistory(), 50)
   };
 
   const handleImageUpload = (e) => {
@@ -549,8 +653,7 @@ function Note() {
       
       setMaxZIndex(newZIndex);
       setImages([...images, newImage]);
-      setIsSaved(false);
-      saveVersion('Added image');
+      setTimeout(() => saveToHistory(), 50)
     };
     reader.readAsDataURL(file);
   };
@@ -558,29 +661,25 @@ function Note() {
   const deleteTextBox = (id) => {
     setTextBoxes(textBoxes.filter(tb => tb.id !== id));
     setSelectedItem(null);
-    setIsSaved(false);
-    saveVersion('Deleted text box');
+    setTimeout(() => saveToHistory(), 50)
   };
 
   const deleteShape = (id) => {
     setShapes(shapes.filter(s => s.id !== id));
     setSelectedItem(null);
-    setIsSaved(false);
-    saveVersion('Deleted shape');
+    setTimeout(() => saveToHistory(), 50)
   };
 
   const deleteSticker = (id) => {
     setStickers(stickers.filter(s => s.id !== id));
     setSelectedItem(null);
-    setIsSaved(false);
-    saveVersion('Deleted sticker');
+    setTimeout(() => saveToHistory(), 50)
   };
 
   const deleteImage = (id) => {
     setImages(images.filter(i => i.id !== id));
     setSelectedItem(null);
-    setIsSaved(false);
-    saveVersion('Deleted image');
+    setTimeout(() => saveToHistory(), 50)
   };
 
   // Function to stop all dragging
@@ -719,9 +818,8 @@ function Note() {
       setStickers([...stickers, newItem]);
       handleSelectItem({ type: 'sticker', id: newItem.id });
     }
-    setIsSaved(false);
-    saveVersion('Pasted item');
     closeContextMenu();
+    setTimeout(() => saveToHistory(), 50)
   };
 
   const duplicateItem = () => {
@@ -786,9 +884,8 @@ function Note() {
         handleSelectItem({ type: 'sticker', id: newItem.id });
       }
     }
-    setIsSaved(false);
-    saveVersion('Duplicated item');
     closeContextMenu();
+    setTimeout(() => saveToHistory(), 50)
   };
 
   // Get all elements with their z-index for ordering
@@ -843,9 +940,8 @@ function Note() {
       ));
     }
     
-    setIsSaved(false);
-    saveVersion('Sent to back');
     closeContextMenu();
+    setTimeout(() => saveToHistory(), 50)
   };
 
   const bringToFront = () => {
@@ -872,9 +968,8 @@ function Note() {
     }
     
     setMaxZIndex(newZIndex);
-    setIsSaved(false);
-    saveVersion('Brought to front');
     closeContextMenu();
+    setTimeout(() => saveToHistory(), 50)
   };
 
   // Close context menu when clicking elsewhere
@@ -888,12 +983,10 @@ function Note() {
 
   const updateShapeColor = (id, fillColor, strokeColor) => {
     setShapes(shapes.map(s => s.id === id ? { ...s, fillColor, strokeColor } : s));
-    setIsSaved(false);
   };
 
   const updateShapeStroke = (id, strokeWidth) => {
     setShapes(shapes.map(s => s.id === id ? { ...s, strokeWidth } : s));
-    setIsSaved(false);
   };
 
   const downloadAsPDF = () => {
@@ -999,8 +1092,8 @@ function Note() {
               ? { ...s, width: s.width + d.width, height: s.height + d.height }
               : s
           ));
-          setIsSaved(false);
           setIsResizing(false);
+          setTimeout(() => saveToHistory(), 50)
         }}
         enable={{
           top: true,
@@ -1073,7 +1166,6 @@ function Note() {
                   ? { ...s, x: startPosX + deltaX, y: startPosY + deltaY }
                   : s
               ));
-              setIsSaved(false);
             };
 
             const handleMouseUp = () => {
@@ -1087,7 +1179,7 @@ function Note() {
                 activeDragHandlersRef.current.mouseUp = null;
               }
               if (hasMoved) {
-                saveVersion('Moved shape');
+                setTimeout(() => saveToHistory(), 50)
               }
             };
 
@@ -1121,14 +1213,12 @@ function Note() {
                   ? { ...s, x: startPosX + deltaX, y: startPosY + deltaY }
                   : s
               ));
-              setIsSaved(false);
             };
 
             const handleTouchEnd = () => {
               setIsDragging(false);
               document.removeEventListener('touchmove', handleTouchMove);
               document.removeEventListener('touchend', handleTouchEnd);
-              saveVersion('Moved shape');
             };
 
             document.addEventListener('touchmove', handleTouchMove, { passive: false });
@@ -1174,6 +1264,11 @@ function Note() {
 
   return (
     <div className="note-page">
+      {loading && (
+        <div className="note-loading" aria-hidden="true">
+          กำลังโหลด...
+        </div>
+      )}
       <div className="note-navbar">
         <button className="note-nav-btn" onClick={() => {
           navigate('/calendar');
@@ -1185,14 +1280,16 @@ function Note() {
           <button 
             className="note-nav-btn" 
             onClick={handleUndo}
-            disabled={currentVersionIndex <= 0}
+            disabled={historyIndex <= 0}
+            title="Undo"
           >
             <Undo2 size={20} />
           </button>
           <button 
             className="note-nav-btn" 
             onClick={handleRedo}
-            disabled={currentVersionIndex >= versions.length - 1}
+            disabled={historyIndex >= history.length - 1}
+            title="Redo"
           >
             <Redo2 size={20} />
           </button>
@@ -1408,39 +1505,8 @@ function Note() {
             )}
           </div>
 
-          <button 
-            className="note-save-indicator"
-            onClick={handleSave}
-            title="Save and go to calendar"
-          >
-            {isSaved ? 'All changes saved' : 'Saving...'}
-          </button>
         </div>
       </div>
-
-      {showVersionHistory && (
-        <div className="note-version-history">
-          <h3>Version History</h3>
-          {versions.length === 0 ? (
-            <p>No version history yet</p>
-          ) : (
-            <div className="version-list">
-              {versions.map((version, index) => (
-                <div 
-                  key={version.id} 
-                  className={`version-item ${index === currentVersionIndex ? 'current' : ''}`}
-                  onClick={() => restoreVersion(index)}
-                >
-                  <div className="version-description">{version.description}</div>
-                  <div className="version-time">
-                    {version.timestamp.toLocaleString()}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
 
       <div 
         className="note-canvas" 
@@ -1474,7 +1540,10 @@ function Note() {
                 className="note-title-input"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                onBlur={() => setIsEditingTitle(false)}
+                onBlur={() => {
+                  setIsEditingTitle(false)
+                  setTimeout(() => saveToHistory(), 50)
+                }}
                 autoFocus
               />
             ) : (
@@ -1483,32 +1552,7 @@ function Note() {
               </h1>
             )}
 
-            {isEditingTag ? (
-              <input
-                className="note-tag-input"
-                value={tagName}
-                onChange={(e) => setTagName(e.target.value)}
-                onBlur={() => {
-                  setIsEditingTag(false)
-                  updateTagInStorage(tagName, tagColor)
-                }}
-                autoFocus
-              />
-            ) : isEditingTagColor ? (
-              <div className="note-tag-color-editor">
-                <input
-                  type="color"
-                  value={tagColor}
-                  onChange={(e) => {
-                    setTagColor(e.target.value)
-                    updateTagInStorage(tagName, e.target.value)
-                  }}
-                  onBlur={() => setIsEditingTagColor(false)}
-                  autoFocus
-                />
-                <button onClick={() => setIsEditingTagColor(false)}>Done</button>
-              </div>
-            ) : showTagSelector ? (
+            {showTagSelector ? (
               <div className="note-tag-selector" onClick={(e) => e.stopPropagation()}>
                 <div className="tag-selector-header">
                   <button className="back-btn" onClick={(e) => {
@@ -1588,14 +1632,9 @@ function Note() {
                 style={{ backgroundColor: tagColor }}
                 onClick={(e) => {
                   e.stopPropagation();
-                  setIsEditingTag(true);
-                }}
-                onDoubleClick={(e) => {
-                  e.stopPropagation();
-                  e.preventDefault();
                   setShowTagSelector(true);
                 }}
-                title="Click to edit name, double-click to select tag"
+                title="Click to select or create tag"
               >
                 {tagName}
               </div>
@@ -1628,8 +1667,8 @@ function Note() {
                           ? { ...img, width: img.width + d.width, height: img.height + d.height }
                           : img
                       ));
-                      setIsSaved(false);
                       setIsResizing(false);
+                      setTimeout(() => saveToHistory(), 50)
                     }}
                     className={`note-image-wrapper ${isSelected ? 'selected' : ''}`}
                     style={{
@@ -1715,7 +1754,6 @@ function Note() {
                               ? { ...img, x: startPosX + deltaX, y: startPosY + deltaY }
                               : img
                           ));
-                          setIsSaved(false);
                         };
 
                         const handleMouseUp = () => {
@@ -1729,7 +1767,7 @@ function Note() {
                             activeDragHandlersRef.current.mouseUp = null;
                           }
                           if (hasMoved) {
-                            saveVersion('Moved image');
+                            setTimeout(() => saveToHistory(), 50)
                           }
                         };
 
@@ -1804,8 +1842,8 @@ function Note() {
                           ? { ...s, width: s.width + d.width, height: s.height + d.height }
                           : s
                       ));
-                      setIsSaved(false);
                       setIsResizing(false);
+                      setTimeout(() => saveToHistory(), 50)
                     }}
                     className={`note-sticker-wrapper ${isSelected ? 'selected' : ''}`}
                     style={{
@@ -1892,7 +1930,6 @@ function Note() {
                               ? { ...s, x: startPosX + deltaX, y: startPosY + deltaY }
                               : s
                           ));
-                          setIsSaved(false);
                         };
 
                         const handleMouseUp = () => {
@@ -1906,7 +1943,7 @@ function Note() {
                             activeDragHandlersRef.current.mouseUp = null;
                           }
                           if (hasMoved) {
-                            saveVersion('Moved sticker');
+                            setTimeout(() => saveToHistory(), 50)
                           }
                         };
 
@@ -1983,8 +2020,8 @@ function Note() {
                       ? { ...tb, width: tb.width + d.width, height: tb.height + d.height }
                       : tb
                   ));
-                  setIsSaved(false);
                   setIsResizing(false);
+                  setTimeout(() => saveToHistory(), 50)
                 }}
                 className={`note-textbox-wrapper ${isSelected ? 'selected' : ''}`}
                 style={{
@@ -2087,7 +2124,6 @@ function Note() {
                           ? { ...tb, x: startPosX + deltaX, y: startPosY + deltaY }
                           : tb
                       ));
-                      setIsSaved(false);
                     };
 
                     const mouseUpHandler = () => {
@@ -2105,7 +2141,6 @@ function Note() {
                         activeDragHandlersRef.current.contextMenu = null;
                       }
                       if (hasMoved && !isRightClickRef.current) {
-                        saveVersion('Moved text box');
                       }
                       isRightClickRef.current = false;
                     };
@@ -2162,7 +2197,6 @@ function Note() {
                           ? { ...tb, x: startPosX + deltaX, y: startPosY + deltaY }
                           : tb
                       ));
-                      setIsSaved(false);
                     };
 
                     const handleTouchEnd = () => {
@@ -2170,7 +2204,6 @@ function Note() {
                       document.removeEventListener('touchmove', handleTouchMove);
                       document.removeEventListener('touchend', handleTouchEnd);
                       if (hasMoved) {
-                        saveVersion('Moved text box');
                       }
                     };
 
@@ -2186,10 +2219,23 @@ function Note() {
                         setTextBoxes(textBoxes.map(tb => 
                           tb.id === textBox.id ? { ...tb, content: e.target.value } : tb
                         ));
-                        setIsSaved(false);
+                        // Debounce history save for text changes (บันทึกหลังพิมพ์หยุด 500ms)
+                        if (textChangeTimeoutRef.current) {
+                          clearTimeout(textChangeTimeoutRef.current)
+                        }
+                        textChangeTimeoutRef.current = setTimeout(() => {
+                          saveToHistory()
+                        }, 500)
                       }}
                       onFocus={() => handleSelectItem({ type: 'textbox', id: textBox.id })}
-                      onBlur={() => saveVersion('Updated text')}
+                      onBlur={() => {
+                        // บันทึก history ทันทีเมื่อ blur (เสร็จการแก้ไข)
+                        if (textChangeTimeoutRef.current) {
+                          clearTimeout(textChangeTimeoutRef.current)
+                          textChangeTimeoutRef.current = null
+                        }
+                        setTimeout(() => saveToHistory(), 50)
+                      }}
                       onMouseDown={(e) => {
                         // Check if right mouse button (button === 2)
                         if (e.button === 2) {
@@ -2245,7 +2291,6 @@ function Note() {
                                 ? { ...tb, x: startPosX + finalDeltaX, y: startPosY + finalDeltaY }
                                 : tb
                             ));
-                            setIsSaved(false);
                           }
                         };
 
@@ -2254,7 +2299,7 @@ function Note() {
                           document.removeEventListener('mousemove', handleMouseMove);
                           document.removeEventListener('mouseup', handleMouseUp);
                           if (hasMoved && !isRightClickRef.current) {
-                            saveVersion('Moved text box');
+                            setTimeout(() => saveToHistory(), 50)
                           }
                           isRightClickRef.current = false;
                         };
