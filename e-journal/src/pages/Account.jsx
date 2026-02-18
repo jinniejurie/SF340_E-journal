@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useLocation } from 'react-router-dom'
 import { doc, getDoc, updateDoc } from 'firebase/firestore'
 import { onAuthStateChanged } from 'firebase/auth'
 
@@ -28,7 +29,8 @@ function accountDataFromDoc(data) {
 }
 
 function Account() {
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true)
+  const location = useLocation()
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
@@ -44,6 +46,11 @@ function Account() {
   const [passwordForEmailChange, setPasswordForEmailChange] = useState('')
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState({ text: '', type: '' }) // type: 'success' | 'error'
+
+  // Reset sidebar state on route change
+  useEffect(() => {
+    setIsSidebarOpen(false)
+  }, [location.pathname])
 
   // Auth state and fetch USER document
   useEffect(() => {

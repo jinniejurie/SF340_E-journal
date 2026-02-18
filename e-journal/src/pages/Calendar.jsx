@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { collection, onSnapshot } from 'firebase/firestore'
 import { db } from '../services/firebase'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { MoreVertical, Trash2 } from 'lucide-react'
 import Navbar from '../components/Navbar.jsx'
 import '../styles/Calendar.css'
@@ -22,9 +22,10 @@ function Calendar() {
     return new Date(year, month, day)
   }
 
+  const location = useLocation()
   const today = useMemo(() => getThaiToday(), [])
   const [currentDate, setCurrentDate] = useState(today)
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true)
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [isThemePickerOpen, setIsThemePickerOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -180,6 +181,11 @@ function Calendar() {
     root.style.setProperty('--theme-color-2', c2)
     root.style.setProperty('--theme-color-3', c3)
   }
+
+  // Reset sidebar state on route change
+  useEffect(() => {
+    setIsSidebarOpen(false)
+  }, [location.pathname])
 
   useEffect(() => {
     applyThemeColors(color1, color2, color3)

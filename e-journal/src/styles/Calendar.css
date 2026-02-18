@@ -795,6 +795,7 @@
 .note-content {
   flex: 1;
   min-width: 0;
+  min-height: auto !important;
 }
 
 .note-name {
