@@ -13,14 +13,10 @@ function Home() {
     navigate('/login')
   }
 
-  const goToCalendar = () => {
-    navigate('/calendar')
-  }
-
   return (
     <div className="home">
       <header className="home-header">
-        <div className="home-logo">ejournal</div>
+        <div className="home-logo">.txt</div>
         <nav className="home-nav">
           <button type="button" className="home-nav-link" onClick={goToSignup}>
             sign up
@@ -40,7 +36,7 @@ function Home() {
             <br />
             <span className="home-hero-title-line">one page at a time</span>
           </h1>
-          <button type="button" className="home-hero-cta" onClick={goToCalendar}>
+          <button type="button" className="home-hero-cta" onClick={goToSignup}>
             Let Started
           </button>
         </section>

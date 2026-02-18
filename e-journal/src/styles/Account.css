@@ -1,0 +1,247 @@
+.calendar-page--with-sidebar .account-main {
+  margin-left: 260px;
+}
+
+/* Main area */
+.account-main {
+  padding: 64px 80px;
+  min-height: 100vh;
+  transition: margin-left 0.3s ease;
+}
+
+/* Header */
+.account-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 40px;
+}
+
+.account-title {
+  font-size: 28px;
+  font-weight: 600;
+  color: #4c3734;
+}
+
+.account-edit-btn {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 14px;
+  color: #6e5a5a;
+  padding: 8px 16px;
+  border-radius: 8px;
+  transition: background-color 0.2s ease;
+}
+
+.account-edit-btn:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+/* Body layout */
+.account-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 48px;
+}
+
+/* Avatar */
+.account-avatar img {
+  width: 160px;
+  height: 160px;
+  border-radius: 16px;
+  object-fit: cover;
+  background: #ffffff;
+}
+
+/* Info text */
+.account-info {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 6px;
+}
+
+.account-info p {
+  font-size: 15px;
+  color: #555;
+}
+
+.account-info span {
+  font-weight: 500;
+  color: #4c3734;
+  margin-right: 6px;
+}
+
+/* Messages */
+.account-message {
+  margin: 0 0 20px;
+  font-size: 14px;
+  padding: 10px 14px;
+  border-radius: 8px;
+}
+
+.account-message--success {
+  background-color: rgba(110, 204, 113, 0.2);
+  color: #2d6b2f;
+}
+
+.account-message--error {
+  background-color: rgba(255, 81, 68, 0.15);
+  color: #b3261e;
+}
+
+.account-loading,
+.account-error {
+  color: #6e5a5a;
+}
+
+/* Birthday fields (Day / Month / Year) */
+.account-birthday-fields {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.account-birthday-fields input {
+  padding: 10px 12px;
+  border: 1.5px solid #e0d5ce;
+  border-radius: 8px;
+  font-size: 14px;
+  font-family: inherit;
+  color: #555;
+  background-color: #ffffff;
+}
+
+.account-birthday-fields input:focus {
+  outline: none;
+  border-color: #e8b4b8;
+  box-shadow: 0 0 0 3px rgba(232, 180, 184, 0.1);
+}
+
+/* Edit Form */
+.account-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+  max-width: 600px;
+}
+
+.form-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.form-section h3 {
+  font-size: 18px;
+  font-weight: 600;
+  color: #4c3734;
+  margin: 0;
+}
+
+/* Profile image upload */
+.profile-image-upload {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
+.profile-preview {
+  width: 160px;
+  height: 160px;
+  border-radius: 16px;
+  object-fit: cover;
+  background: #ffffff;
+  border: 2px solid #e0d5ce;
+}
+
+.upload-btn {
+  display: inline-block;
+  padding: 12px 20px;
+  background-color: #e8b4b8;
+  color: #4c3734;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 500;
+  font-size: 14px;
+  transition: background-color 0.2s ease;
+  user-select: none;
+}
+
+.upload-btn:hover {
+  background-color: #dfa0a5;
+}
+
+/* Form groups */
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.form-group label {
+  font-size: 14px;
+  font-weight: 500;
+  color: #4c3734;
+}
+
+.form-group input,
+.form-group textarea {
+  padding: 10px 12px;
+  border: 1.5px solid #e0d5ce;
+  border-radius: 8px;
+  font-size: 14px;
+  font-family: inherit;
+  color: #555;
+  background-color: #ffffff;
+  transition: border-color 0.2s ease;
+}
+
+.form-group input:focus,
+.form-group textarea:focus {
+  outline: none;
+  border-color: #e8b4b8;
+  box-shadow: 0 0 0 3px rgba(232, 180, 184, 0.1);
+}
+
+.form-group textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+
+/* Form actions */
+.form-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.btn-save,
+.btn-cancel {
+  padding: 12px 24px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.btn-save {
+  background-color: #6ecc71;
+  color: #ffffff;
+}
+
+.btn-save:hover {
+  background-color: #52b40a;
+}
+
+.btn-cancel {
+  background-color: #ff5144;
+  color: #ffffff;
+}
+
+.btn-cancel:hover {
+  background-color: #e63c28;
+}
