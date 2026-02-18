@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useRef } from 'react'
 import { collection, onSnapshot } from 'firebase/firestore'
-import { db } from '../services/firebase'
+import { db, auth } from '../services/firebase'
+import { getCalendarNotesFromFirestore, saveCalendarNoteToFirestore, subscribeToCalendarNotes, deleteCalendarNoteFromFirestore } from '../services/calendarNotesService'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { MoreVertical, Trash2 } from 'lucide-react'
 import Navbar from '../components/Navbar.jsx'
@@ -84,6 +85,8 @@ function Calendar() {
     } catch (e) {}
     return {}
   })
+  const isInitialLoadRef = useRef(true)
+  const isSyncingRef = useRef(false)
 
   const [emotions, setEmotions] = useState([
     { id: 'm01', emoji: '😠', label: 'Angry' },
@@ -229,8 +232,65 @@ function Calendar() {
     }
   }, [])
 
+  // Load calendar notes from Firestore on mount and subscribe to changes
   useEffect(() => {
-    try { localStorage.setItem('ejournal-notes', JSON.stringify(notes)) } catch (e) {}
+    if (!db || !auth?.currentUser) return
+
+    let unsubFirestore = null
+
+    if (isInitialLoadRef.current) {
+      isInitialLoadRef.current = false
+      getCalendarNotesFromFirestore()
+        .then((firestoreNotes) => {
+          if (Object.keys(firestoreNotes).length > 0) {
+            isSyncingRef.current = true
+            setNotes(firestoreNotes)
+            try {
+              localStorage.setItem('ejournal-notes', JSON.stringify(firestoreNotes))
+            } catch (e) {}
+          } else {
+            try {
+              const stored = localStorage.getItem('ejournal-notes')
+              if (stored) {
+                const localNotes = JSON.parse(stored)
+                Object.values(localNotes).flat().forEach((note) => {
+                  if (note && note.id) saveCalendarNoteToFirestore(note).catch(() => {})
+                })
+              }
+            } catch (e) {}
+          }
+        })
+        .catch((err) => console.error('Error loading calendar notes from Firestore:', err))
+    }
+
+    unsubFirestore = subscribeToCalendarNotes((firestoreNotes) => {
+      if (!isSyncingRef.current) {
+        setNotes(firestoreNotes)
+        try {
+          localStorage.setItem('ejournal-notes', JSON.stringify(firestoreNotes))
+        } catch (e) {}
+      }
+    })
+
+    return () => {
+      if (unsubFirestore) unsubFirestore()
+    }
+  }, [])
+
+  // Save to localStorage (cache) and Firestore when notes change
+  useEffect(() => {
+    if (isSyncingRef.current) {
+      isSyncingRef.current = false
+      return
+    }
+    try {
+      localStorage.setItem('ejournal-notes', JSON.stringify(notes))
+    } catch (e) {}
+    if (db && auth?.currentUser) {
+      Object.values(notes).flat().forEach((note) => {
+        if (note && note.id) saveCalendarNoteToFirestore(note).catch(() => {})
+      })
+    }
   }, [notes])
 
   const handleDayClick = (day) => {
@@ -259,13 +319,16 @@ function Calendar() {
   const handleDeleteNote = (noteId, e) => {
     e.stopPropagation()
     const dateKey = getDayKey(selectedDay)
-    setNotes(prev => {
+    setNotes((prev) => {
       const updatedNotes = { ...prev }
       if (updatedNotes[dateKey]) {
-        updatedNotes[dateKey] = updatedNotes[dateKey].filter(n => n.id !== noteId)
+        updatedNotes[dateKey] = updatedNotes[dateKey].filter((n) => n.id !== noteId)
         if (updatedNotes[dateKey].length === 0) {
           delete updatedNotes[dateKey]
         }
+      }
+      if (db && auth?.currentUser) {
+        deleteCalendarNoteFromFirestore(noteId).catch(() => {})
       }
       return updatedNotes
     })
@@ -289,23 +352,38 @@ function Calendar() {
   const handleSaveNote = () => {
     if (noteType === 'note' && noteName.trim() && selectedTag) {
       const dateKey = `${currentYear}-${currentDate.getMonth() + 1}-${selectedDay}`
-      const selectedTagObj = tags.find(t => t.id === selectedTag)
+      const selectedTagObj = tags.find((t) => t.id === selectedTag)
       const newNote = {
-        id: Date.now(), type: 'note', name: noteName,
-        tag: selectedTagObj, emotion: selectedEmotion,
-        date: dateKey, createdAt: new Date().toISOString()
+        id: Date.now(),
+        type: 'note',
+        name: noteName,
+        tag: selectedTagObj,
+        emotion: selectedEmotion,
+        date: dateKey,
+        createdAt: new Date().toISOString()
       }
-      setNotes(prev => ({ ...prev, [dateKey]: [...(prev[dateKey] || []), newNote] }))
+      setNotes((prev) => ({ ...prev, [dateKey]: [...(prev[dateKey] || []), newNote] }))
+      if (db && auth?.currentUser) {
+        saveCalendarNoteToFirestore(newNote).catch(() => {})
+      }
       closeDayModal()
       navigate(`/calendar/note?noteId=${newNote.id}`)
     } else if (noteType === 'todo' && noteName.trim()) {
       const dateKey = `${currentYear}-${currentDate.getMonth() + 1}-${selectedDay}`
       const newTodo = {
-        id: Date.now(), type: 'todo', name: noteName,
-        color: '#000000', emotion: selectedEmotion,
-        date: dateKey, completed: false, createdAt: new Date().toISOString()
+        id: Date.now(),
+        type: 'todo',
+        name: noteName,
+        color: '#000000',
+        emotion: selectedEmotion,
+        date: dateKey,
+        completed: false,
+        createdAt: new Date().toISOString()
       }
-      setNotes(prev => ({ ...prev, [dateKey]: [...(prev[dateKey] || []), newTodo] }))
+      setNotes((prev) => ({ ...prev, [dateKey]: [...(prev[dateKey] || []), newTodo] }))
+      if (db && auth?.currentUser) {
+        saveCalendarNoteToFirestore(newTodo).catch(() => {})
+      }
       closeDayModal()
     }
   }
