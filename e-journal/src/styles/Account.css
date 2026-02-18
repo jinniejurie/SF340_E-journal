@@ -4,8 +4,7 @@
 
 /* Main area */
 .account-main {
-  padding: 64px 80px;
-  min-height: 100vh;
+  padding: 64px 0;
   transition: margin-left 0.3s ease;
 }
 
@@ -13,8 +12,7 @@
 .account-header {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 40px;
+
 }
 
 .account-title {
@@ -58,7 +56,6 @@
 .account-info {
   display: flex;
   flex-direction: column;
-  gap: 14px;
   margin-top: 6px;
 }
 
