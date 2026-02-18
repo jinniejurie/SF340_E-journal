@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { collection, onSnapshot } from 'firebase/firestore'
 import { db } from '../services/firebase'
 import { useNavigate } from 'react-router-dom'
+import { MoreVertical, Trash2 } from 'lucide-react'
 import Navbar from '../components/Navbar.jsx'
 import '../styles/Calendar.css'
 
@@ -37,6 +38,7 @@ function Calendar() {
   const [showNewTagForm, setShowNewTagForm] = useState(false)
   const [newTagName, setNewTagName] = useState('')
   const [newTagColor, setNewTagColor] = useState('#FF6B6B')
+  const [openMenuId, setOpenMenuId] = useState(null)
 
   const navigate = useNavigate()
 
@@ -245,6 +247,23 @@ function Calendar() {
     setShowNewTagForm(false)
     setNewTagName('')
     setNewTagColor('#FF6B6B')
+    setOpenMenuId(null)
+  }
+
+  const handleDeleteNote = (noteId, e) => {
+    e.stopPropagation()
+    const dateKey = getDayKey(selectedDay)
+    setNotes(prev => {
+      const updatedNotes = { ...prev }
+      if (updatedNotes[dateKey]) {
+        updatedNotes[dateKey] = updatedNotes[dateKey].filter(n => n.id !== noteId)
+        if (updatedNotes[dateKey].length === 0) {
+          delete updatedNotes[dateKey]
+        }
+      }
+      return updatedNotes
+    })
+    setOpenMenuId(null)
   }
 
   const handleNoteTypeSelect = (type) => {
@@ -483,6 +502,7 @@ function Calendar() {
                       className="note-item"
                       role="button"
                       onClick={() => {
+                        if (openMenuId === note.id) return
                         if (note.type === 'todo') {
                           navigate(`/calendar/toDoList?todoId=${note.id}`)
                         } else if (note.type === 'note') {
@@ -499,6 +519,28 @@ function Calendar() {
                           {note.type === 'todo' ? 'To-do List' : note.tag?.name}
                           {note.emotion && ` • ${emotions.find(e => e.id === note.emotion)?.emoji}`}
                         </div>
+                      </div>
+                      <div className="note-item-menu-wrapper">
+                        <button
+                          className="note-item-menu-btn"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setOpenMenuId(openMenuId === note.id ? null : note.id)
+                          }}
+                        >
+                          <MoreVertical size={16} />
+                        </button>
+                        {openMenuId === note.id && (
+                          <div className="note-item-menu" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              className="note-item-menu-item"
+                              onClick={(e) => handleDeleteNote(note.id, e)}
+                            >
+                              <Trash2 size={14} />
+                              <span>Delete</span>
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </div>
                   ))}

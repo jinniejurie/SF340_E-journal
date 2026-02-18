@@ -814,6 +814,71 @@
   color: #888;
 }
 
+.note-item-menu-wrapper {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.note-item-menu-btn {
+  background: none;
+  border: none;
+  padding: 0.25rem;
+  cursor: pointer;
+  color: #666;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+  opacity: 0;
+}
+
+.note-item:hover .note-item-menu-btn {
+  opacity: 1;
+}
+
+.note-item-menu-btn:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+.note-item-menu {
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  right: 0;
+  background: white;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  padding: 0.25rem;
+  min-width: 120px;
+  z-index: 1000;
+}
+
+.note-item-menu-item {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 4px;
+  font-family: 'Unbounded', -apple-system, Roboto, Helvetica, sans-serif;
+  font-size: 0.8rem;
+  color: #333;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  transition: background-color 0.2s;
+}
+
+.note-item-menu-item:hover {
+  background-color: rgba(255, 107, 107, 0.1);
+  color: #FF6B6B;
+}
+
+.note-item-menu-item svg {
+  flex-shrink: 0;
+}
+
 /* Add Note Button */
 .add-note-btn {
   width: 100%;
