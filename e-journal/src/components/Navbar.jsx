@@ -7,13 +7,23 @@ import { signOut } from '../services/authService'
 
 function Navbar({
   defaultOpen = false,
+  open: controlledOpen,
+  contentOnly = false,
+  hideToggleButton = false,
   onOpenChange,
+  onOpenSearch,
   ariaLabel = 'App navigation',
 }) {
   const navigate = useNavigate()
   const location = useLocation()
   const [user, setUser] = useState(null)
-  const [isOpen, setIsOpen] = useState(defaultOpen)
+  const [internalOpen, setInternalOpen] = useState(defaultOpen)
+  const isOpen = controlledOpen !== undefined ? controlledOpen : internalOpen
+
+  const setOpen = (next) => {
+    if (controlledOpen === undefined) setInternalOpen(next)
+    onOpenChange?.(next)
+  }
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
 
   useEffect(() => {
@@ -32,11 +42,6 @@ function Navbar({
     return ''
   }, [location.pathname])
 
-  const setOpen = (next) => {
-    setIsOpen(next)
-    onOpenChange?.(next)
-  }
-
   const toggle = () => setOpen(!isOpen)
   const collapse = () => setOpen(false)
 
@@ -46,7 +51,7 @@ function Navbar({
   }
 
   const handleSearch = () => {
-    window.alert('Coming soon')
+    onOpenSearch?.(true)
     collapse()
   }
 
@@ -72,14 +77,117 @@ function Navbar({
     await performLogout()
   }
 
+  if (contentOnly) {
+    return (
+      <>
+        <div className="calendar-sidebar-header">DotText</div>
+        <nav className="calendar-sidebar-nav" aria-label={ariaLabel}>
+          <button
+            type="button"
+            className={`calendar-sidebar-link ${activeKey === 'account' ? 'calendar-sidebar-link--active' : ''}`}
+            onClick={() => goTo('/account')}
+            disabled={!isAuthed}
+            aria-disabled={!isAuthed}
+          >
+            <span className="calendar-sidebar-link-icon">
+              <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path
+                  d="M12 12c1.66 0 3-1.34 3-3S13.66 6 12 6s-3 1.34-3 3 1.34 3 3 3Zm0 2c-2.33 0-7 1.17-7 3.5V19c0 1.1.9 2 2 2h10a2 2 0 0 0 2-2v-1.5C19 15.17 14.33 14 12 14Z"
+                  fill="currentColor"
+                />
+              </svg>
+            </span>
+            <span className="calendar-sidebar-link-label">Account</span>
+          </button>
+          <button
+            type="button"
+            className={`calendar-sidebar-link ${activeKey === 'home' ? 'calendar-sidebar-link--active' : ''}`}
+            onClick={() => goTo('/calendar')}
+            disabled={!isAuthed}
+            aria-disabled={!isAuthed}
+          >
+            <span className="calendar-sidebar-link-icon">
+              <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M12 3 3 10h2v8h5v-5h4v5h5v-8h2L12 3Z" fill="currentColor" />
+              </svg>
+            </span>
+            <span className="calendar-sidebar-link-label">Home</span>
+          </button>
+          <button
+            type="button"
+            className="calendar-sidebar-link"
+            onClick={handleSearch}
+            title="Coming soon"
+          >
+            <span className="calendar-sidebar-link-icon">
+              <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path
+                  d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79L19 20.49 20.49 19 15.5 14Zm-6 0C8.01 14 6 11.99 6 9.5S8.01 5 10.5 5 15 7.01 15 9.5 12.99 14 10.5 14Z"
+                  fill="currentColor"
+                />
+              </svg>
+            </span>
+            <span className="calendar-sidebar-link-label">Search</span>
+          </button>
+          {isAuthed && (
+            <button type="button" className="calendar-sidebar-link" onClick={handleLogoutClick}>
+              <span className="calendar-sidebar-link-icon">
+                <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path
+                    d="M6 5h7v2H6v10h7v2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Zm9.59 3.59L18.17 11H11v2h7.17l-2.58 2.59L17 17l5-5-5-5-1.41 1.59Z"
+                    fill="currentColor"
+                  />
+                </svg>
+              </span>
+              <span className="calendar-sidebar-link-label">Logout</span>
+            </button>
+          )}
+        </nav>
+
+        {showLogoutConfirm && (
+          <div
+            className="nav-popup-overlay"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="nav-logout-title"
+          >
+            <div className="nav-popup">
+              <h2 id="nav-logout-title" className="nav-popup-title">
+                Log out
+              </h2>
+              <p className="nav-popup-text">Are you sure you want to log out?</p>
+              <div className="nav-popup-actions">
+                <button
+                  type="button"
+                  className="nav-popup-btn nav-popup-btn--secondary"
+                  onClick={() => setShowLogoutConfirm(false)}
+                >
+                  Stay
+                </button>
+                <button
+                  type="button"
+                  className="nav-popup-btn nav-popup-btn--primary"
+                  onClick={handleLogoutConfirm}
+                >
+                  Log out
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </>
+    )
+  }
+
   return (
     <>
-      <button
-        className="calendar-nav-btn"
-        aria-label="Toggle menu"
-        type="button"
-        onClick={toggle}
-      >
+      {!hideToggleButton && (
+        <button
+          className={`calendar-nav-btn ${isOpen ? 'calendar-nav-btn--hidden' : ''}`}
+          aria-label="Toggle menu"
+          type="button"
+          onClick={toggle}
+        >
         <svg width="25" height="25" viewBox="0 0 25 25" fill="none" xmlns="http://www.w3.org/2000/svg">
           <path
             fillRule="evenodd"
@@ -95,84 +203,86 @@ function Navbar({
           />
         </svg>
       </button>
+      )}
 
+      {/* Sidebar — width animates open/closed; white-space:nowrap prevents content from wrapping during transition */}
       <div className={`calendar-sidebar ${isOpen ? 'calendar-sidebar--open' : ''}`}>
-      <button
-        className="calendar-sidebar-close-btn"
-        type="button"
-        aria-label="Close menu"
-        onClick={collapse}
-      >
-        «
-      </button>
-      <div className="calendar-sidebar-header">DotText</div>
-
-      <nav className="calendar-sidebar-nav" aria-label={ariaLabel}>
         <button
+          className="calendar-sidebar-close-btn"
           type="button"
-          className={`calendar-sidebar-link ${activeKey === 'account' ? 'calendar-sidebar-link--active' : ''}`}
-          onClick={() => goTo('/account')}
-          disabled={!isAuthed}
-          aria-disabled={!isAuthed}
+          aria-label="Close menu"
+          onClick={collapse}
         >
-          <span className="calendar-sidebar-link-icon">
-            <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-              <path
-                d="M12 12c1.66 0 3-1.34 3-3S13.66 6 12 6s-3 1.34-3 3 1.34 3 3 3Zm0 2c-2.33 0-7 1.17-7 3.5V19c0 1.1.9 2 2 2h10a2 2 0 0 0 2-2v-1.5C19 15.17 14.33 14 12 14Z"
-                fill="currentColor"
-              />
-            </svg>
-          </span>
-          <span className="calendar-sidebar-link-label">Account</span>
+          «
         </button>
+        <div className="calendar-sidebar-header">DotText</div>
 
-        <button
-          type="button"
-          className={`calendar-sidebar-link ${activeKey === 'home' ? 'calendar-sidebar-link--active' : ''}`}
-          onClick={() => goTo('/calendar')}
-          disabled={!isAuthed}
-          aria-disabled={!isAuthed}
-        >
-          <span className="calendar-sidebar-link-icon">
-            <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-              <path d="M12 3 3 10h2v8h5v-5h4v5h5v-8h2L12 3Z" fill="currentColor" />
-            </svg>
-          </span>
-          <span className="calendar-sidebar-link-label">Home</span>
-        </button>
-
-        <button
-          type="button"
-          className="calendar-sidebar-link"
-          onClick={handleSearch}
-          title="Coming soon"
-        >
-          <span className="calendar-sidebar-link-icon">
-            <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-              <path
-                d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79L19 20.49 20.49 19 15.5 14Zm-6 0C8.01 14 6 11.99 6 9.5S8.01 5 10.5 5 15 7.01 15 9.5 12.99 14 10.5 14Z"
-                fill="currentColor"
-              />
-            </svg>
-          </span>
-          <span className="calendar-sidebar-link-label">Search</span>
-        </button>
-
-        {isAuthed && (
-          <button type="button" className="calendar-sidebar-link" onClick={handleLogoutClick}>
+        <nav className="calendar-sidebar-nav" aria-label={ariaLabel}>
+          <button
+            type="button"
+            className={`calendar-sidebar-link ${activeKey === 'account' ? 'calendar-sidebar-link--active' : ''}`}
+            onClick={() => goTo('/account')}
+            disabled={!isAuthed}
+            aria-disabled={!isAuthed}
+          >
             <span className="calendar-sidebar-link-icon">
               <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                 <path
-                  d="M6 5h7v2H6v10h7v2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Zm9.59 3.59L18.17 11H11v2h7.17l-2.58 2.59L17 17l5-5-5-5-1.41 1.59Z"
+                  d="M12 12c1.66 0 3-1.34 3-3S13.66 6 12 6s-3 1.34-3 3 1.34 3 3 3Zm0 2c-2.33 0-7 1.17-7 3.5V19c0 1.1.9 2 2 2h10a2 2 0 0 0 2-2v-1.5C19 15.17 14.33 14 12 14Z"
                   fill="currentColor"
                 />
               </svg>
             </span>
-            <span className="calendar-sidebar-link-label">Logout</span>
+            <span className="calendar-sidebar-link-label">Account</span>
           </button>
-        )}
-      </nav>
-    </div>
+
+          <button
+            type="button"
+            className={`calendar-sidebar-link ${activeKey === 'home' ? 'calendar-sidebar-link--active' : ''}`}
+            onClick={() => goTo('/calendar')}
+            disabled={!isAuthed}
+            aria-disabled={!isAuthed}
+          >
+            <span className="calendar-sidebar-link-icon">
+              <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M12 3 3 10h2v8h5v-5h4v5h5v-8h2L12 3Z" fill="currentColor" />
+              </svg>
+            </span>
+            <span className="calendar-sidebar-link-label">Home</span>
+          </button>
+
+          <button
+            type="button"
+            className="calendar-sidebar-link"
+            onClick={handleSearch}
+            title="Coming soon"
+          >
+            <span className="calendar-sidebar-link-icon">
+              <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path
+                  d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79L19 20.49 20.49 19 15.5 14Zm-6 0C8.01 14 6 11.99 6 9.5S8.01 5 10.5 5 15 7.01 15 9.5 12.99 14 10.5 14Z"
+                  fill="currentColor"
+                />
+              </svg>
+            </span>
+            <span className="calendar-sidebar-link-label">Search</span>
+          </button>
+
+          {isAuthed && (
+            <button type="button" className="calendar-sidebar-link" onClick={handleLogoutClick}>
+              <span className="calendar-sidebar-link-icon">
+                <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path
+                    d="M6 5h7v2H6v10h7v2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Zm9.59 3.59L18.17 11H11v2h7.17l-2.58 2.59L17 17l5-5-5-5-1.41 1.59Z"
+                    fill="currentColor"
+                  />
+                </svg>
+              </span>
+              <span className="calendar-sidebar-link-label">Logout</span>
+            </button>
+          )}
+        </nav>
+      </div>
 
       {showLogoutConfirm && (
         <div
@@ -210,4 +320,3 @@ function Navbar({
 }
 
 export default Navbar
-
