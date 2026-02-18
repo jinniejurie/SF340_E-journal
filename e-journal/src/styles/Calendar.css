@@ -532,7 +532,7 @@
   background: var(--calendar-day-bg);
   overflow: hidden;
   height: auto;
-  border: 2px solid var(--calendar-border);
+  border: 1px solid var(--calendar-border);
   margin-top: 1rem;
 }
 
@@ -732,13 +732,6 @@
   border-bottom: 1px solid #f0f0f0;
 }
 
-.emotion-selector--inline {
-  margin: 0.5rem 0;
-  padding: 0.5rem 0;
-  border: none;
-  justify-content: flex-start;
-}
-
 .emotion-btn {
   width: 52px;
   height: 52px;
@@ -802,6 +795,7 @@
 .note-content {
   flex: 1;
   min-width: 0;
+  min-height: auto !important;
 }
 
 .note-name {
