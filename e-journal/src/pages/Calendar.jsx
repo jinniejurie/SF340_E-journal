@@ -339,6 +339,7 @@ function Calendar() {
     setNoteType(type)
     setNoteName('')
     setSelectedTag(null)
+    if (!selectedEmotion) setSelectedEmotion(emotions[0]?.id ?? null)
   }
 
   const handleBackFromNoteCreation = () => {
@@ -347,6 +348,12 @@ function Calendar() {
     setNoteName('')
     setSelectedTag(null)
     setShowNewTagForm(false)
+  }
+
+  const persistNotesToStorage = (nextNotes) => {
+    try {
+      localStorage.setItem('ejournal-notes', JSON.stringify(nextNotes))
+    } catch (err) {}
   }
 
   const handleSaveNote = () => {
@@ -362,7 +369,9 @@ function Calendar() {
         date: dateKey,
         createdAt: new Date().toISOString()
       }
-      setNotes((prev) => ({ ...prev, [dateKey]: [...(prev[dateKey] || []), newNote] }))
+      const nextNotes = { ...notes, [dateKey]: [...(notes[dateKey] || []), newNote] }
+      setNotes(nextNotes)
+      persistNotesToStorage(nextNotes)
       if (db && auth?.currentUser) {
         saveCalendarNoteToFirestore(newNote).catch(() => {})
       }
@@ -380,7 +389,9 @@ function Calendar() {
         completed: false,
         createdAt: new Date().toISOString()
       }
-      setNotes((prev) => ({ ...prev, [dateKey]: [...(prev[dateKey] || []), newTodo] }))
+      const nextNotes = { ...notes, [dateKey]: [...(notes[dateKey] || []), newTodo] }
+      setNotes(nextNotes)
+      persistNotesToStorage(nextNotes)
       if (db && auth?.currentUser) {
         saveCalendarNoteToFirestore(newTodo).catch(() => {})
       }
@@ -416,7 +427,6 @@ function Calendar() {
       <Navbar
         open={isSidebarOpen}
         onOpenChange={setIsSidebarOpen}
-        onOpenSearch={setSearchOpen}
         hideToggleButton
         ariaLabel="Calendar navigation"
       />
@@ -601,7 +611,7 @@ function Calendar() {
                         <div className="note-name">{note.name}</div>
                         <div className="note-meta">
                           {note.type === 'todo' ? 'To-do List' : note.tag?.name}
-                          {note.emotion && ` • ${emotions.find(e => e.id === note.emotion)?.emoji}`}
+                          {note.emotion && (() => { const em = emotions.find(e => e.id === note.emotion); return em ? ` • ${em.emoji}` : null; })()}
                         </div>
                       </div>
                       <div className="note-item-menu-wrapper">
@@ -671,6 +681,24 @@ function Calendar() {
                         placeholder={noteType === 'todo' ? 'Enter task name' : 'Enter note name'}
                         autoFocus
                       />
+                    </div>
+
+                    <div className="form-group">
+                      <label className="form-label">Mood</label>
+                      <div className="emotion-selector emotion-selector--inline">
+                        {emotions.map(emotion => (
+                          <button
+                            key={emotion.id}
+                            type="button"
+                            className={`emotion-btn${selectedEmotion === emotion.id ? ' emotion-btn--selected' : ''}`}
+                            onClick={() => setSelectedEmotion(emotion.id)}
+                            aria-label={emotion.label}
+                            title={emotion.label}
+                          >
+                            <span className="emotion-emoji">{emotion.emoji}</span>
+                          </button>
+                        ))}
+                      </div>
                     </div>
 
                     {noteType === 'note' && (

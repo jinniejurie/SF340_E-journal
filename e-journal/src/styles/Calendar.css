@@ -732,6 +732,13 @@
   border-bottom: 1px solid #f0f0f0;
 }
 
+.emotion-selector--inline {
+  margin: 0.5rem 0;
+  padding: 0.5rem 0;
+  border: none;
+  justify-content: flex-start;
+}
+
 .emotion-btn {
   width: 52px;
   height: 52px;
