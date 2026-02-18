@@ -1,8 +1,13 @@
 import { useEffect, useMemo, useState, useRef } from 'react'
 import { collection, onSnapshot } from 'firebase/firestore'
+<<<<<<< HEAD
 import { db, auth } from '../services/firebase'
 import { getCalendarNotesFromFirestore, saveCalendarNoteToFirestore, subscribeToCalendarNotes, deleteCalendarNoteFromFirestore } from '../services/calendarNotesService'
 import { useNavigate, useLocation } from 'react-router-dom'
+=======
+import { db } from '../services/firebase'
+import { useNavigate } from 'react-router-dom'
+>>>>>>> parent of f6ef251 (Refactor Account and Calendar components to reset sidebar state on route change; update Calendar.css to ensure note content has auto min-height.)
 import { MoreVertical, Trash2 } from 'lucide-react'
 import Navbar from '../components/Navbar.jsx'
 import '../styles/Calendar.css'
@@ -23,10 +28,9 @@ function Calendar() {
     return new Date(year, month, day)
   }
 
-  const location = useLocation()
   const today = useMemo(() => getThaiToday(), [])
   const [currentDate, setCurrentDate] = useState(today)
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true)
   const [isThemePickerOpen, setIsThemePickerOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -184,11 +188,6 @@ function Calendar() {
     root.style.setProperty('--theme-color-2', c2)
     root.style.setProperty('--theme-color-3', c3)
   }
-
-  // Reset sidebar state on route change
-  useEffect(() => {
-    setIsSidebarOpen(false)
-  }, [location.pathname])
 
   useEffect(() => {
     applyThemeColors(color1, color2, color3)
