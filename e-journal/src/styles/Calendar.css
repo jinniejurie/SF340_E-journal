@@ -532,7 +532,7 @@
   background: var(--calendar-day-bg);
   overflow: hidden;
   height: auto;
-  border: 1px solid var(--calendar-border);
+  border: 2px solid var(--calendar-border);
   margin-top: 1rem;
 }
 

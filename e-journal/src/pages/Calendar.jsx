@@ -136,7 +136,7 @@ function Calendar() {
   const getDaysInMonth = (date) => {
     const year = date.getFullYear()
     const month = date.getMonth()
-    const firstDay = new Date(year, month, 1).getDay()
+    const firstDay = getThaiToday(year, month, 1).getDay()
     const daysInMonth = new Date(year, month + 1, 0).getDate()
     const days = []
     for (let i = 0; i < firstDay; i++) days.push(null)
