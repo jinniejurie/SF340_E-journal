@@ -17,7 +17,9 @@ function Calendar() {
       day: 'numeric',
     })
     const parts = formatter.formatToParts(now)
-    const year = Number(parts.find(p => p.type === 'year')?.value)
+    // formatter คืนปีเป็น พ.ศ. แต่ Date() ต้องการ ค.ศ. จึงต้องลบ 543
+    const buddhistYear = Number(parts.find(p => p.type === 'year')?.value)
+    const year = buddhistYear - 543 // แปลงจาก พ.ศ. เป็น ค.ศ.
     const month = Number(parts.find(p => p.type === 'month')?.value) - 1
     const day = Number(parts.find(p => p.type === 'day')?.value)
     return new Date(year, month, day)
