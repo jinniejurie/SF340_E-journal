@@ -138,9 +138,11 @@ function Calendar() {
   const getDaysInMonth = (date) => {
     const year = date.getFullYear()
     const month = date.getMonth()
-    const firstDay = getThaiToday(year, month, 1).getDay()
+    // getDay() คืนค่า: 0=อาทิตย์, 1=จันทร์, 2=อังคาร, ..., 6=เสาร์
+    const firstDay = new Date(year, month, 1).getDay()
     const daysInMonth = new Date(year, month + 1, 0).getDate()
     const days = []
+    // เพิ่ม null สำหรับวันก่อนวันแรกของเดือน (เริ่มจากวันอาทิตย์ = 0)
     for (let i = 0; i < firstDay; i++) days.push(null)
     for (let day = 1; day <= daysInMonth; day++) days.push(day)
     while (days.length % 7 !== 0) days.push(null)
@@ -149,7 +151,10 @@ function Calendar() {
 
   const days = getDaysInMonth(currentDate)
   const currentMonth = monthNames[currentDate.getMonth()]
+  // currentYear สำหรับ logic และ dateKey (ค.ศ.)
   const currentYear = currentDate.getFullYear()
+  // displayYear สำหรับแสดงผล (พ.ศ.)
+  const displayYear = currentYear + 543
 
   const isToday = (day) => {
     if (!day) return false
@@ -411,7 +416,7 @@ function Calendar() {
               <span className="calendar-customize-label">Customize</span>
             </button>
           </div>
-          <h2 className="calendar-year">{currentYear}</h2>
+          <h2 className="calendar-year">{displayYear}</h2>
 
           {/* Theme Popover */}
           {isThemePickerOpen && (
@@ -478,7 +483,7 @@ function Calendar() {
             {!showNoteCreation ? (
               <>
                 <div className="modal-header">
-                  <h2 className="modal-date">{monthNames[currentDate.getMonth()]} {selectedDay}, {currentYear}</h2>
+                  <h2 className="modal-date">{monthNames[currentDate.getMonth()]} {selectedDay}, {displayYear}</h2>
                 </div>
 
                 {/* Emotion Selector */}
