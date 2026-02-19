@@ -11,7 +11,6 @@ function Navbar({
   contentOnly = false,
   hideToggleButton = false,
   onOpenChange,
-  onOpenSearch,
   ariaLabel = 'App navigation',
 }) {
   const navigate = useNavigate()
@@ -38,6 +37,7 @@ function Navbar({
 
   const activeKey = useMemo(() => {
     if (location.pathname.startsWith('/account')) return 'account'
+    if (location.pathname.startsWith('/calendar/search')) return 'search'
     if (location.pathname.startsWith('/calendar')) return 'home'
     return ''
   }, [location.pathname])
@@ -51,8 +51,7 @@ function Navbar({
   }
 
   const handleSearch = () => {
-    onOpenSearch?.(true)
-    collapse()
+    goTo('/calendar/search')
   }
 
   const performLogout = async () => {
@@ -115,9 +114,8 @@ function Navbar({
           </button>
           <button
             type="button"
-            className="calendar-sidebar-link"
+            className={`calendar-sidebar-link ${activeKey === 'search' ? 'calendar-sidebar-link--active' : ''}`}
             onClick={handleSearch}
-            title="Coming soon"
           >
             <span className="calendar-sidebar-link-icon">
               <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
