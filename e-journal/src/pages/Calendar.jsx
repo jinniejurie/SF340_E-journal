@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { collection, getDocs } from 'firebase/firestore'
-import { db } from '../services/firebase'
+import { onAuthStateChanged } from 'firebase/auth'
+import { auth, db } from '../services/firebase'
 import { useNavigate } from 'react-router-dom'
 import { MoreVertical, Trash2 } from 'lucide-react'
 import Navbar from '../components/Navbar.jsx'
@@ -199,14 +200,14 @@ function Calendar() {
     try { localStorage.setItem('ejournal-tags', JSON.stringify(tags)) } catch (e) {}
   }, [tags])
 
-  // โหลด LABEL และ MOOD แค่ครั้งเดียวตอน mount (ไม่ใช้ onSnapshot เพื่อลด Read quota)
+  // โหลด LABEL และ MOOD เมื่อล็อกอินแล้วเท่านั้น (ถ้าไม่มีสิทธิ์ใช้ค่า default + แจ้งแค่ครั้งเดียว)
   useEffect(() => {
-    if (!db) {
-      console.warn('Firestore not initialized; skipping LABEL and MOOD sync.')
-      return
-    }
+    if (!db || !auth) return
 
     let cancelled = false
+    const moodEmojiMap = {
+      Angry: '😠', Sad: '😢', Calm: '😌', Happy: '😊', Excited: '🤩', Exited: '🤩'
+    }
 
     const loadLabels = async () => {
       try {
@@ -217,12 +218,10 @@ function Calendar() {
           return { id: d.id, name: data.name || data.labID || '', color: data.color || '#999' }
         }))
       } catch (err) {
-        if (!cancelled) console.error('LABEL getDocs error', err)
+        if (!cancelled && (err?.code === 'permission-denied' || err?.message?.includes('permission'))) {
+          console.warn('LABEL: No read permission. Using default tags. Add read rule for LABEL in Firestore if needed.')
+        }
       }
-    }
-
-    const moodEmojiMap = {
-      Angry: '😠', Sad: '😢', Calm: '😌', Happy: '😊', Excited: '🤩', Exited: '🤩'
     }
 
     const loadMoods = async () => {
@@ -235,14 +234,24 @@ function Calendar() {
           return { id: d.id, label: name, emoji: moodEmojiMap[name] || '' }
         }))
       } catch (err) {
-        if (!cancelled) console.error('MOOD getDocs error', err)
+        if (!cancelled && (err?.code === 'permission-denied' || err?.message?.includes('permission'))) {
+          console.warn('MOOD: No read permission. Using default moods. Add read rule for MOOD in Firestore if needed.')
+        }
       }
     }
 
-    loadLabels()
-    loadMoods()
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (cancelled) return
+      if (user) {
+        loadLabels()
+        loadMoods()
+      }
+    })
 
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+      unsubscribe()
+    }
   }, [])
 
   useEffect(() => {

@@ -1,0 +1,23 @@
+// Copy this to Firebase Console > Firestore Database > Rules
+// เพื่อให้อ่าน collection LABEL และ MOOD ได้ (แก้ error Missing or insufficient permissions)
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ให้ user ที่ล็อกอินแล้วอ่าน LABEL และ MOOD ได้ (ใช้ใน Calendar)
+    match /LABEL/{id} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+    match /MOOD/{id} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
+    // ข้อมูลของ user แต่ละคน
+    match /USER/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+  }
+}
