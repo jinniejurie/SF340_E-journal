@@ -84,6 +84,7 @@ function ToDoList() {
   const paperRef = useRef(null)
   const stateRef = useRef({ title, items, paperColor, textColor })
   const saveEffectRunCount = useRef(0)
+  const firestoreSaveTimeoutRef = useRef(null)
 
   const dateKey = calendarTodoResult?.dateKey ?? null
   const storageKey = todoId ?? 'draft'
@@ -128,8 +129,8 @@ function ToDoList() {
     return () => { cancelled = true }
   }, [todoId])
 
-  // บันทึกทุกครั้งที่ state เปลี่ยน (เหมือนโน้ต – พิมพ์แล้วมีเก็บไว้เลย)
-  // รอบแรกไม่บันทึก เพื่อไม่ให้เขียนทับข้อมูลที่เพิ่งโหลดจาก localStorage
+  // บันทึก localStorage ทันที; Firestore ใช้ debounce 1.5 วินาที เพื่อลด Write quota
+  const FIRESTORE_DEBOUNCE_MS = 1500
   useEffect(() => {
     saveEffectRunCount.current += 1
     if (saveEffectRunCount.current <= 1) return
@@ -141,8 +142,19 @@ function ToDoList() {
       textColor
     }
     saveTodoToLocalStorage(storageKey, payload)
+
     if (auth?.currentUser && todoId && dateKey) {
-      saveTodoToFirestore(todoId, payload).catch(() => {})
+      if (firestoreSaveTimeoutRef.current) clearTimeout(firestoreSaveTimeoutRef.current)
+      firestoreSaveTimeoutRef.current = setTimeout(() => {
+        firestoreSaveTimeoutRef.current = null
+        saveTodoToFirestore(todoId, payload).catch(() => {})
+      }, FIRESTORE_DEBOUNCE_MS)
+    }
+    return () => {
+      if (firestoreSaveTimeoutRef.current) {
+        clearTimeout(firestoreSaveTimeoutRef.current)
+        firestoreSaveTimeoutRef.current = null
+      }
     }
   }, [storageKey, dateKey, title, items, paperColor, textColor])
 

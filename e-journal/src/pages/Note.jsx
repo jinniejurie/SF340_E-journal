@@ -130,6 +130,7 @@ function Note() {
   const [loading, setLoading] = useState(false)
   const [selectedItem, setSelectedItem] = useState(null)
   const saveEnabledRef = useRef(false)
+  const firestoreSaveTimeoutRef = useRef(null)
   const [showColorPicker, setShowColorPicker] = useState(false)
   
   // Undo/Redo history
@@ -220,7 +221,8 @@ function Note() {
     }
   }, [noteId])
 
-  // บันทึกอัตโนมัติทุกครั้งที่ state เปลี่ยน (หลังโหลดเสร็จ 150ms)
+  // บันทึก localStorage ทันที; Firestore ใช้ debounce 2 วินาที เพื่อลด Write quota
+  const FIRESTORE_DEBOUNCE_MS = 2000
   useEffect(() => {
     if (!saveEnabledRef.current) return
     const payload = {
@@ -235,8 +237,19 @@ function Note() {
       maxZIndex
     }
     saveNoteToLocalStorage(storageKey, payload)
+
     if (auth?.currentUser && noteId && dateKey) {
-      saveNoteToFirestore(noteId, payload).catch(() => {})
+      if (firestoreSaveTimeoutRef.current) clearTimeout(firestoreSaveTimeoutRef.current)
+      firestoreSaveTimeoutRef.current = setTimeout(() => {
+        firestoreSaveTimeoutRef.current = null
+        saveNoteToFirestore(noteId, payload).catch(() => {})
+      }, FIRESTORE_DEBOUNCE_MS)
+    }
+    return () => {
+      if (firestoreSaveTimeoutRef.current) {
+        clearTimeout(firestoreSaveTimeoutRef.current)
+        firestoreSaveTimeoutRef.current = null
+      }
     }
   }, [storageKey, dateKey, title, tagName, tagColor, textBoxes, shapes, images, stickers, maxZIndex])
 
@@ -265,24 +278,28 @@ function Note() {
   }, [])
 
   // Update note name in calendar localStorage when title changes (sync with calendar)
+  // ใช้เฉพาะ [title, noteId] เพื่อไม่ให้ effect รันทุก re-render จาก latestNote
   useEffect(() => {
-    if (latestNote && noteId) {
-      try {
-        const stored = localStorage.getItem('ejournal-notes')
-        if (stored) {
-          const notes = JSON.parse(stored)
-          const dateKey = latestNote.date
-          if (notes[dateKey]) {
-            const updatedNotes = notes[dateKey].map(n => 
-              n.id === latestNote.id ? { ...n, name: title } : n
-            )
-            notes[dateKey] = updatedNotes
-            localStorage.setItem('ejournal-notes', JSON.stringify(notes))
-          }
-        }
-      } catch (e) {}
-    }
-  }, [title, latestNote, noteId])
+    if (!noteId) return
+    try {
+      const stored = localStorage.getItem('ejournal-notes')
+      if (!stored) return
+      const notes = JSON.parse(stored)
+      const allNotes = Object.values(notes).flat()
+      if (allNotes.length === 0) return
+      const sorted = allNotes.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      const latest = sorted[0]
+      if (!latest || String(latest.id) !== String(noteId)) return
+      const dateKey = latest.date
+      if (notes[dateKey]) {
+        const updatedNotes = notes[dateKey].map(n =>
+          n.id === latest.id ? { ...n, name: title } : n
+        )
+        notes[dateKey] = updatedNotes
+        localStorage.setItem('ejournal-notes', JSON.stringify(notes))
+      }
+    } catch (e) {}
+  }, [title, noteId])
 
   // Undo/Redo functions
   const saveToHistory = () => {

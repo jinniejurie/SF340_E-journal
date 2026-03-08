@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { collection, onSnapshot } from 'firebase/firestore'
+import { collection, getDocs } from 'firebase/firestore'
 import { db } from '../services/firebase'
 import { useNavigate } from 'react-router-dom'
 import { MoreVertical, Trash2 } from 'lucide-react'
@@ -199,35 +199,50 @@ function Calendar() {
     try { localStorage.setItem('ejournal-tags', JSON.stringify(tags)) } catch (e) {}
   }, [tags])
 
+  // โหลด LABEL และ MOOD แค่ครั้งเดียวตอน mount (ไม่ใช้ onSnapshot เพื่อลด Read quota)
   useEffect(() => {
     if (!db) {
       console.warn('Firestore not initialized; skipping LABEL and MOOD sync.')
       return
     }
 
-    const unsubLabels = onSnapshot(collection(db, 'LABEL'), snap => {
-      setTags(snap.docs.map(d => {
-        const data = d.data()
-        return { id: d.id, name: data.name || data.labID || '', color: data.color || '#999' }
-      }))
-    }, err => console.error('LABEL onSnapshot error', err))
+    let cancelled = false
+
+    const loadLabels = async () => {
+      try {
+        const snap = await getDocs(collection(db, 'LABEL'))
+        if (cancelled) return
+        setTags(snap.docs.map(d => {
+          const data = d.data()
+          return { id: d.id, name: data.name || data.labID || '', color: data.color || '#999' }
+        }))
+      } catch (err) {
+        if (!cancelled) console.error('LABEL getDocs error', err)
+      }
+    }
 
     const moodEmojiMap = {
       Angry: '😠', Sad: '😢', Calm: '😌', Happy: '😊', Excited: '🤩', Exited: '🤩'
     }
 
-    const unsubMoods = onSnapshot(collection(db, 'MOOD'), snap => {
-      setEmotions(snap.docs.map(d => {
-        const data = d.data()
-        const name = data.moodName || data.mood || data.name || ''
-        return { id: d.id, label: name, emoji: moodEmojiMap[name] || '' }
-      }))
-    }, err => console.error('MOOD onSnapshot error', err))
-
-    return () => {
-      try { unsubLabels() } catch (e) {}
-      try { unsubMoods() } catch (e) {}
+    const loadMoods = async () => {
+      try {
+        const snap = await getDocs(collection(db, 'MOOD'))
+        if (cancelled) return
+        setEmotions(snap.docs.map(d => {
+          const data = d.data()
+          const name = data.moodName || data.mood || data.name || ''
+          return { id: d.id, label: name, emoji: moodEmojiMap[name] || '' }
+        }))
+      } catch (err) {
+        if (!cancelled) console.error('MOOD getDocs error', err)
+      }
     }
+
+    loadLabels()
+    loadMoods()
+
+    return () => { cancelled = true }
   }, [])
 
   useEffect(() => {
