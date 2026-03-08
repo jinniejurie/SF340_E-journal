@@ -15,8 +15,12 @@ service cloud.firestore {
       allow write: if false;
     }
 
-    // ข้อมูลของ user แต่ละคน
+    // ข้อมูลของ user แต่ละคน (โปรไฟล์ + subcollections)
     match /USER/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+    // รายการปฏิทิน (โน้ต/ to-do บนวัน) แยกตาม user
+    match /USER/{userId}/CALENDAR_NOTES/{noteId} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
   }

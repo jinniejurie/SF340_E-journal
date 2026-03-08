@@ -4,6 +4,7 @@ import { onAuthStateChanged } from 'firebase/auth'
 
 import { auth } from '../services/firebase'
 import { signOut } from '../services/authService'
+import { clearEjournalLocalStorage } from '../utils/ejournalStorage'
 
 function Navbar({
   defaultOpen = false,
@@ -60,9 +61,7 @@ function Navbar({
     } catch (e) {
       // ignore - we still route away
     }
-    try {
-      localStorage.removeItem('ejournal-profile')
-    } catch (e) {}
+    clearEjournalLocalStorage()
     collapse()
     navigate('/')
   }

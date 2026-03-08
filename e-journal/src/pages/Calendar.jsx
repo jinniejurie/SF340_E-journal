@@ -2,6 +2,11 @@ import { useEffect, useMemo, useState } from 'react'
 import { collection, getDocs } from 'firebase/firestore'
 import { onAuthStateChanged } from 'firebase/auth'
 import { auth, db } from '../services/firebase'
+import {
+  getCalendarNotesFromFirestore,
+  saveCalendarNoteToFirestore,
+  deleteCalendarNoteFromFirestore,
+} from '../services/calendarNotesService'
 import { useNavigate } from 'react-router-dom'
 import { MoreVertical, Trash2 } from 'lucide-react'
 import Navbar from '../components/Navbar.jsx'
@@ -258,6 +263,25 @@ function Calendar() {
     try { localStorage.setItem('ejournal-notes', JSON.stringify(notes)) } catch (e) {}
   }, [notes])
 
+  // โหลดรายการปฏิทิน (จุดบนวัน) จาก Firestore เมื่อล็อกอิน เพื่อไม่ให้ข้อมูลปนกับบัญชีอื่น
+  useEffect(() => {
+    if (!auth) return
+    let cancelled = false
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (cancelled) return
+      if (user) {
+        const firestoreNotes = await getCalendarNotesFromFirestore()
+        if (!cancelled) setNotes(firestoreNotes || {})
+      } else {
+        setNotes({})
+      }
+    })
+    return () => {
+      cancelled = true
+      unsubscribe()
+    }
+  }, [])
+
   const handleDayClick = (day) => {
     if (day) {
       setSelectedDay(day)
@@ -294,6 +318,7 @@ function Calendar() {
       }
       return updatedNotes
     })
+    deleteCalendarNoteFromFirestore(noteId).catch(() => {})
     setOpenMenuId(null)
   }
 
@@ -316,21 +341,34 @@ function Calendar() {
       const dateKey = `${currentYear}-${currentDate.getMonth() + 1}-${selectedDay}`
       const selectedTagObj = tags.find(t => t.id === selectedTag)
       const newNote = {
-        id: Date.now(), type: 'note', name: noteName,
-        tag: selectedTagObj, emotion: selectedEmotion,
-        date: dateKey, createdAt: new Date().toISOString()
+        id: Date.now(),
+        type: 'note',
+        name: noteName,
+        tag: selectedTagObj,
+        emotion: selectedEmotion,
+        date: dateKey,
+        dateKey,
+        createdAt: new Date().toISOString(),
       }
       setNotes(prev => ({ ...prev, [dateKey]: [...(prev[dateKey] || []), newNote] }))
+      saveCalendarNoteToFirestore(newNote).catch(() => {})
       closeDayModal()
       navigate(`/calendar/note?noteId=${newNote.id}`)
     } else if (noteType === 'todo' && noteName.trim()) {
       const dateKey = `${currentYear}-${currentDate.getMonth() + 1}-${selectedDay}`
       const newTodo = {
-        id: Date.now(), type: 'todo', name: noteName,
-        color: '#000000', emotion: selectedEmotion,
-        date: dateKey, completed: false, createdAt: new Date().toISOString()
+        id: Date.now(),
+        type: 'todo',
+        name: noteName,
+        color: '#000000',
+        emotion: selectedEmotion,
+        date: dateKey,
+        dateKey,
+        completed: false,
+        createdAt: new Date().toISOString(),
       }
       setNotes(prev => ({ ...prev, [dateKey]: [...(prev[dateKey] || []), newTodo] }))
+      saveCalendarNoteToFirestore(newTodo).catch(() => {})
       closeDayModal()
     }
   }
