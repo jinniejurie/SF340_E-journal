@@ -154,10 +154,14 @@ function ToDoList() {
       if (firestoreSaveTimeoutRef.current) {
         clearTimeout(firestoreSaveTimeoutRef.current)
         firestoreSaveTimeoutRef.current = null
+        if (auth?.currentUser && todoId && dateKey) {
+          saveTodoToFirestore(todoId, payload).catch(() => {})
+        }
       }
     }
   }, [storageKey, dateKey, title, items, paperColor, textColor])
 
+  // บันทึกเฉพาะ localStorage; Firestore จะ sync ผ่าน debounced effect ด้านบน
   const saveToDb = (payload) => {
     const full = {
       dateKey: dateKey ?? undefined,
@@ -167,9 +171,6 @@ function ToDoList() {
       textColor: payload?.textColor ?? textColor
     }
     saveTodoToLocalStorage(storageKey, full)
-    if (auth?.currentUser && todoId && dateKey) {
-      saveTodoToFirestore(todoId, full).catch(() => {})
-    }
   }
 
   const openCustomize = () => setOpenMenu((m) => (m === 'customize' ? null : 'customize'))

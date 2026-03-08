@@ -249,6 +249,9 @@ function Note() {
       if (firestoreSaveTimeoutRef.current) {
         clearTimeout(firestoreSaveTimeoutRef.current)
         firestoreSaveTimeoutRef.current = null
+        if (auth?.currentUser && noteId && dateKey) {
+          saveNoteToFirestore(noteId, payload).catch(() => {})
+        }
       }
     }
   }, [storageKey, dateKey, title, tagName, tagColor, textBoxes, shapes, images, stickers, maxZIndex])
