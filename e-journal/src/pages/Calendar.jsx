@@ -7,6 +7,8 @@ import {
   saveCalendarNoteToFirestore,
   deleteCalendarNoteFromFirestore,
 } from '../services/calendarNotesService'
+import { saveNoteToFirestore } from '../services/noteService'
+import { saveTodoToFirestore } from '../services/todoService'
 import { useNavigate } from 'react-router-dom'
 import { MoreVertical, Trash2 } from 'lucide-react'
 import Navbar from '../components/Navbar.jsx'
@@ -352,6 +354,18 @@ function Calendar() {
       }
       setNotes(prev => ({ ...prev, [dateKey]: [...(prev[dateKey] || []), newNote] }))
       saveCalendarNoteToFirestore(newNote).catch(() => {})
+      // สร้างโครง NOTE เปล่าใน Firestore เพื่อให้เห็นใน USER/{uid}/NOTES/{noteId} ทันที
+      saveNoteToFirestore(String(newNote.id), {
+        dateKey,
+        title: newNote.name,
+        tagName: selectedTagObj?.name || '',
+        tagColor: selectedTagObj?.color || '#FF6B6B',
+        textBoxes: [],
+        shapes: [],
+        images: [],
+        stickers: [],
+        maxZIndex: 1,
+      }).catch(() => {})
       closeDayModal()
       navigate(`/calendar/note?noteId=${newNote.id}`)
     } else if (noteType === 'todo' && noteName.trim()) {
@@ -369,6 +383,14 @@ function Calendar() {
       }
       setNotes(prev => ({ ...prev, [dateKey]: [...(prev[dateKey] || []), newTodo] }))
       saveCalendarNoteToFirestore(newTodo).catch(() => {})
+      // สร้างโครง TODO เปล่าใน Firestore เพื่อให้เห็นใน USER/{uid}/TODOS/{todoId} ทันที
+      saveTodoToFirestore(String(newTodo.id), {
+        dateKey,
+        title: newTodo.name,
+        items: [],
+        paperColor: '#F7F7F7',
+        textColor: '#3A3030',
+      }).catch(() => {})
       closeDayModal()
     }
   }
