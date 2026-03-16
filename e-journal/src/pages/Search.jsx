@@ -1,10 +1,13 @@
 import { useMemo, useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { collection, getDocs } from 'firebase/firestore'
+import { onAuthStateChanged } from 'firebase/auth'
 import Navbar from '../components/Navbar.jsx'
+import { db, auth } from '../services/firebase'
 import '../styles/Calendar.css'
 import '../styles/Search.css'
 
-const EMOTIONS = [
+const DEFAULT_EMOTIONS = [
   { id: 'm01', emoji: '😠', label: 'Angry' },
   { id: 'm02', emoji: '😢', label: 'Sad' },
   { id: 'm03', emoji: '😌', label: 'Calm' },
@@ -46,6 +49,7 @@ function Search() {
   const [query, setQuery] = useState('')
   const [typeFilter, setTypeFilter] = useState('all') // 'all' | 'note' | 'todo'
   const [moodFilter, setMoodFilter] = useState(null)  // null = all, or emotion id
+  const [emotions, setEmotions] = useState(DEFAULT_EMOTIONS)
   const [notes, setNotes] = useState({})
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
 
@@ -70,6 +74,53 @@ function Search() {
       (arr || []).map(n => ({ ...n, dateKey }))
     )
   }, [notes])
+
+  // โหลด MOOD จาก Firestore (เหมือน Calendar) เพื่อให้ id ที่ใช้ตรงกับ note.emotion
+  useEffect(() => {
+    if (!db || !auth) return
+
+    let cancelled = false
+    const moodEmojiMap = {
+      Angry: '😠',
+      Sad: '😢',
+      Calm: '😌',
+      Happy: '😊',
+      Excited: '🤩',
+      Exited: '🤩'
+    }
+
+    const loadMoods = async () => {
+      try {
+        const snap = await getDocs(collection(db, 'MOOD'))
+        if (cancelled) return
+        if (!snap.empty) {
+          setEmotions(
+            snap.docs.map(d => {
+              const data = d.data()
+              const name = data.moodName || data.mood || data.name || ''
+              return { id: d.id, label: name, emoji: moodEmojiMap[name] || '' }
+            })
+          )
+        }
+      } catch (err) {
+        if (!cancelled && (err?.code === 'permission-denied' || err?.message?.includes('permission'))) {
+          console.warn('MOOD (Search): No read permission. Using default moods. Add read rule for MOOD in Firestore if needed.')
+        }
+      }
+    }
+
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (cancelled) return
+      if (user) {
+        loadMoods()
+      }
+    })
+
+    return () => {
+      cancelled = true
+      unsubscribe()
+    }
+  }, [])
 
   const results = useMemo(() => {
     const q = (query || '').trim().toLowerCase()
@@ -197,7 +248,7 @@ function Search() {
               >
                 All
               </button>
-              {EMOTIONS.map(e => (
+              {emotions.map(e => (
                 <button
                   key={e.id}
                   type="button"
@@ -243,7 +294,7 @@ function Search() {
                         <span className="search-result-date">{formatDate(item.dateKey)}</span>
                         {(item.emotion || item.mood) && (
                           <span className="search-result-mood">
-                            {EMOTIONS.find(ev => ev.id === (item.emotion || item.mood))?.emoji}
+                            {emotions.find(ev => ev.id === (item.emotion || item.mood))?.emoji}
                           </span>
                         )}
                       </div>
