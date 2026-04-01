@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import { Resizable } from 're-resizable'
 import { 
@@ -35,15 +35,25 @@ import sticker7 from '../assets/stickers/sticker7.png'
 import sticker8 from '../assets/stickers/sticker8.png'
 import sticker9 from '../assets/stickers/sticker9.png'
 import sticker10 from '../assets/stickers/sticker10.png'
+import c2Sticker1 from '../assets/stickers/collection2/work1.svg'
+import c2Sticker2 from '../assets/stickers/collection2/work2.svg'
+import c2Sticker3 from '../assets/stickers/collection2/work3.svg'
+import c2Sticker4 from '../assets/stickers/collection2/work4.svg'
+import c2Sticker5 from '../assets/stickers/collection2/work5.svg'
+import c2Sticker6 from '../assets/stickers/collection2/work6.svg'
+import c2Sticker7 from '../assets/stickers/collection2/work7.svg'
 
-const STICKERS = [
-  sticker4,
-  sticker5,
-  sticker6,
-  sticker7,
-  sticker8,
-  sticker9,
-  sticker10
+const STICKER_COLLECTIONS = [
+  {
+    id: 1,
+    label: 'Tapes',
+    items: [sticker4, sticker5, sticker6, sticker7, sticker8, sticker9, sticker10]
+  },
+  {
+    id: 2,
+    label: 'Work? Nah',
+    items: [c2Sticker1, c2Sticker2, c2Sticker3, c2Sticker4, c2Sticker5, c2Sticker6, c2Sticker7]
+  }
 ]
 
 const NOTE_STORAGE_KEY = (id) => `ejournal-note-${id ?? 'draft'}`
@@ -125,6 +135,7 @@ function Note() {
   const [maxZIndex, setMaxZIndex] = useState(1)
   const [showShapesMenu, setShowShapesMenu] = useState(false)
   const [showStickersMenu, setShowStickersMenu] = useState(false)
+  const [activeStickerCollectionIndex, setActiveStickerCollectionIndex] = useState(0)
   const [showShareMenu, setShowShareMenu] = useState(false)
   const [isAddingTextBox, setIsAddingTextBox] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -172,6 +183,49 @@ function Note() {
   const fileInputRef = useRef(null)
   const activeDragHandlersRef = useRef({ mouseMove: null, mouseUp: null, contextMenu: null })
   const isRightClickRef = useRef(false)
+  const stickerHostElementsRef = useRef(new Map())
+  const stickerDragCleanupRef = useRef(null)
+  const skipPersistDuringCanvasDragRef = useRef(false)
+  const persistSnapshotRef = useRef(null)
+  const FIRESTORE_DEBOUNCE_MS = 2000
+
+  persistSnapshotRef.current = {
+    storageKey,
+    dateKey,
+    title,
+    tagName,
+    tagColor,
+    textBoxes,
+    shapes,
+    images,
+    stickers,
+    maxZIndex
+  }
+
+  const flushPersistFromSnapshot = useCallback(() => {
+    if (!saveEnabledRef.current) return
+    const s = persistSnapshotRef.current
+    if (!s) return
+    const payload = {
+      dateKey: s.dateKey ?? undefined,
+      title: s.title,
+      tagName: s.tagName,
+      tagColor: s.tagColor,
+      textBoxes: s.textBoxes,
+      shapes: s.shapes,
+      images: s.images,
+      stickers: s.stickers,
+      maxZIndex: s.maxZIndex
+    }
+    saveNoteToLocalStorage(s.storageKey, payload)
+    if (auth?.currentUser && noteId && s.dateKey) {
+      if (firestoreSaveTimeoutRef.current) clearTimeout(firestoreSaveTimeoutRef.current)
+      firestoreSaveTimeoutRef.current = setTimeout(() => {
+        firestoreSaveTimeoutRef.current = null
+        saveNoteToFirestore(noteId, payload).catch(() => {})
+      }, FIRESTORE_DEBOUNCE_MS)
+    }
+  }, [noteId])
 
   // โหลดจาก localStorage/Firestore ตอนเข้า
   useEffect(() => {
@@ -222,9 +276,9 @@ function Note() {
   }, [noteId])
 
   // บันทึก localStorage ทันที; Firestore ใช้ debounce 2 วินาที เพื่อลด Write quota
-  const FIRESTORE_DEBOUNCE_MS = 2000
   useEffect(() => {
     if (!saveEnabledRef.current) return
+    if (skipPersistDuringCanvasDragRef.current) return
     const payload = {
       dateKey: dateKey ?? undefined,
       title,
@@ -642,7 +696,7 @@ function Note() {
       y,
       width: 150,
       height: 150,
-      rotation: Math.random() * 20 - 10,
+      rotation: 0,
       zIndex: newZIndex
     };
     
@@ -704,6 +758,13 @@ function Note() {
 
   // Function to stop all dragging
   const stopAllDragging = () => {
+    const stickerCleanup = stickerDragCleanupRef.current
+    stickerDragCleanupRef.current = null
+    stickerCleanup?.()
+    if (skipPersistDuringCanvasDragRef.current) {
+      skipPersistDuringCanvasDragRef.current = false
+      requestAnimationFrame(() => flushPersistFromSnapshot())
+    }
     setIsDragging(false);
     isRightClickRef.current = false;
     // Remove any active drag handlers
@@ -1176,6 +1237,7 @@ function Note() {
               if (!hasMoved) {
                 setIsDragging(true);
                 hasMoved = true;
+                skipPersistDuringCanvasDragRef.current = true;
               }
               moveEvent.preventDefault();
               const deltaX = moveEvent.clientX - startX;
@@ -1199,6 +1261,8 @@ function Note() {
                 activeDragHandlersRef.current.mouseUp = null;
               }
               if (hasMoved) {
+                skipPersistDuringCanvasDragRef.current = false
+                requestAnimationFrame(() => flushPersistFromSnapshot())
                 setTimeout(() => saveToHistory(), 50)
               }
             };
@@ -1221,9 +1285,14 @@ function Note() {
             const startY = touch.clientY;
             const startPosX = shape.x;
             const startPosY = shape.y;
+            let touchMoved = false;
 
             const handleTouchMove = (moveEvent) => {
               moveEvent.preventDefault();
+              if (!touchMoved) {
+                touchMoved = true;
+                skipPersistDuringCanvasDragRef.current = true;
+              }
               const touch = moveEvent.touches[0];
               const deltaX = touch.clientX - startX;
               const deltaY = touch.clientY - startY;
@@ -1239,6 +1308,11 @@ function Note() {
               setIsDragging(false);
               document.removeEventListener('touchmove', handleTouchMove);
               document.removeEventListener('touchend', handleTouchEnd);
+              if (touchMoved) {
+                skipPersistDuringCanvasDragRef.current = false
+                requestAnimationFrame(() => flushPersistFromSnapshot())
+                setTimeout(() => saveToHistory(), 50)
+              }
             };
 
             document.addEventListener('touchmove', handleTouchMove, { passive: false });
@@ -1400,16 +1474,40 @@ function Note() {
               <Sticker size={20} />
             </button>
             {showStickersMenu && (
-              <div className="note-dropdown-menu note-stickers-menu">
-                {STICKERS.map((sticker, index) => (
-                  <button key={index} onClick={(e) => {
-                    const clickX = e.clientX;
-                    const clickY = e.clientY;
-                    addSticker(sticker, clickX, clickY);
-                  }} className="sticker-btn">
-                    <img src={sticker} alt={`Sticker ${index + 1}`} />
-                  </button>
-                ))}
+              <div className="note-dropdown-menu note-stickers-menu-wrapper">
+                <div className="note-sticker-collection-tabs" role="tablist">
+                  {STICKER_COLLECTIONS.map((col, idx) => (
+                    <button
+                      key={col.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={activeStickerCollectionIndex === idx}
+                      className={`note-sticker-collection-tab ${activeStickerCollectionIndex === idx ? 'active' : ''}`}
+                      onClick={() => setActiveStickerCollectionIndex(idx)}
+                    >
+                      {col.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="note-stickers-menu">
+                  {STICKER_COLLECTIONS[activeStickerCollectionIndex].items.map((stickerSrc, index) => (
+                    <button
+                      key={`${activeStickerCollectionIndex}-${index}`}
+                      type="button"
+                      onClick={(e) => {
+                        const clickX = e.clientX;
+                        const clickY = e.clientY;
+                        addSticker(stickerSrc, clickX, clickY);
+                      }}
+                      className="sticker-btn"
+                    >
+                      <img
+                        src={stickerSrc}
+                        alt={`${STICKER_COLLECTIONS[activeStickerCollectionIndex].label} ${index + 1}`}
+                      />
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -1764,6 +1862,7 @@ function Note() {
                           if (!hasMoved) {
                             setIsDragging(true);
                             hasMoved = true;
+                            skipPersistDuringCanvasDragRef.current = true;
                           }
                           moveEvent.preventDefault();
                           const deltaX = moveEvent.clientX - startX;
@@ -1787,6 +1886,8 @@ function Note() {
                             activeDragHandlersRef.current.mouseUp = null;
                           }
                           if (hasMoved) {
+                            skipPersistDuringCanvasDragRef.current = false
+                            requestAnimationFrame(() => flushPersistFromSnapshot())
                             setTimeout(() => saveToHistory(), 50)
                           }
                         };
@@ -1848,9 +1949,26 @@ function Note() {
               } else if (element.elementType === 'sticker') {
                 const sticker = element;
                 const isSelected = selectedItem?.type === 'sticker' && selectedItem.id === sticker.id;
+                const sid = sticker.id
                 return (
+                  <div
+                    key={sid}
+                    className="note-sticker-host"
+                    style={{
+                      position: 'absolute',
+                      left: sticker.x,
+                      top: sticker.y,
+                      zIndex: sticker.zIndex || 1,
+                      width: sticker.width,
+                      height: sticker.height,
+                      willChange: 'transform'
+                    }}
+                    ref={(el) => {
+                      if (el) stickerHostElementsRef.current.set(sid, el)
+                      else stickerHostElementsRef.current.delete(sid)
+                    }}
+                  >
                   <Resizable
-                    key={sticker.id}
                     size={{ width: sticker.width, height: sticker.height }}
                     onResizeStart={() => {
                       setIsResizing(true);
@@ -1867,10 +1985,9 @@ function Note() {
                     }}
                     className={`note-sticker-wrapper ${isSelected ? 'selected' : ''}`}
                     style={{
-                      position: 'absolute',
-                      left: sticker.x,
-                      top: sticker.y,
-                      zIndex: sticker.zIndex || 1
+                      position: 'relative',
+                      left: 0,
+                      top: 0
                     }}
                     enable={{
                       top: true,
@@ -1929,50 +2046,62 @@ function Note() {
                         const startPosX = sticker.x;
                         const startPosY = sticker.y;
                         let hasMoved = false;
+                        const dragDelta = { dx: 0, dy: 0 };
 
-                        const handleMouseMove = (moveEvent) => {
-                          // Don't drag if context menu is open
+                        stickerDragCleanupRef.current = () => {
+                          const host = stickerHostElementsRef.current.get(sid)
+                          if (host) host.style.transform = ''
+                        }
+
+                        const handleStickerDragMove = (moveEvent) => {
                           if (isContextMenuOpen) {
                             stopAllDragging();
                             return;
                           }
-                          
                           if (!hasMoved) {
-                            setIsDragging(true);
                             hasMoved = true;
+                            skipPersistDuringCanvasDragRef.current = true;
                           }
                           moveEvent.preventDefault();
-                          const deltaX = moveEvent.clientX - startX;
-                          const deltaY = moveEvent.clientY - startY;
-                          
-                          setStickers(prevStickers => prevStickers.map(s =>
-                            s.id === sticker.id
-                              ? { ...s, x: startPosX + deltaX, y: startPosY + deltaY }
-                              : s
-                          ));
+                          dragDelta.dx = moveEvent.clientX - startX;
+                          dragDelta.dy = moveEvent.clientY - startY;
+                          const host = stickerHostElementsRef.current.get(sid)
+                          if (host) {
+                            host.style.transform = `translate(${dragDelta.dx}px, ${dragDelta.dy}px)`
+                          }
                         };
 
-                        const handleMouseUp = () => {
+                        const handleStickerDragUp = () => {
                           setIsDragging(false);
-                          if (activeDragHandlersRef.current.mouseMove === handleMouseMove) {
-                            document.removeEventListener('mousemove', handleMouseMove);
+                          if (activeDragHandlersRef.current.mouseMove === handleStickerDragMove) {
+                            document.removeEventListener('mousemove', handleStickerDragMove);
                             activeDragHandlersRef.current.mouseMove = null;
                           }
-                          if (activeDragHandlersRef.current.mouseUp === handleMouseUp) {
-                            document.removeEventListener('mouseup', handleMouseUp);
+                          if (activeDragHandlersRef.current.mouseUp === handleStickerDragUp) {
+                            document.removeEventListener('mouseup', handleStickerDragUp);
                             activeDragHandlersRef.current.mouseUp = null;
                           }
+                          const cleanup = stickerDragCleanupRef.current
+                          stickerDragCleanupRef.current = null
+                          const { dx, dy } = dragDelta
+                          cleanup?.()
                           if (hasMoved) {
+                            skipPersistDuringCanvasDragRef.current = false
+                            setStickers(prevStickers => prevStickers.map(s =>
+                              s.id === sid
+                                ? { ...s, x: startPosX + dx, y: startPosY + dy }
+                                : s
+                            ))
+                            requestAnimationFrame(() => flushPersistFromSnapshot())
                             setTimeout(() => saveToHistory(), 50)
                           }
                         };
 
-                        // Store handlers in ref
-                        activeDragHandlersRef.current.mouseMove = handleMouseMove;
-                        activeDragHandlersRef.current.mouseUp = handleMouseUp;
+                        activeDragHandlersRef.current.mouseMove = handleStickerDragMove;
+                        activeDragHandlersRef.current.mouseUp = handleStickerDragUp;
                         
-                        document.addEventListener('mousemove', handleMouseMove);
-                        document.addEventListener('mouseup', handleMouseUp);
+                        document.addEventListener('mousemove', handleStickerDragMove);
+                        document.addEventListener('mouseup', handleStickerDragUp);
                       }}
                     >
                       <img
@@ -2020,6 +2149,7 @@ function Note() {
                       </>
                     )}
                   </Resizable>
+                  </div>
                 );
               }
               
@@ -2134,6 +2264,7 @@ function Note() {
                       if (!hasMoved) {
                         setIsDragging(true);
                         hasMoved = true;
+                        skipPersistDuringCanvasDragRef.current = true;
                       }
                       moveEvent.preventDefault();
                       const deltaX = moveEvent.clientX - startX;
@@ -2161,6 +2292,9 @@ function Note() {
                         activeDragHandlersRef.current.contextMenu = null;
                       }
                       if (hasMoved && !isRightClickRef.current) {
+                        skipPersistDuringCanvasDragRef.current = false
+                        requestAnimationFrame(() => flushPersistFromSnapshot())
+                        setTimeout(() => saveToHistory(), 50)
                       }
                       isRightClickRef.current = false;
                     };
@@ -2206,6 +2340,7 @@ function Note() {
                       if (!hasMoved) {
                         setIsDragging(true);
                         hasMoved = true;
+                        skipPersistDuringCanvasDragRef.current = true;
                       }
                       moveEvent.preventDefault();
                       const touch = moveEvent.touches[0];
@@ -2224,6 +2359,9 @@ function Note() {
                       document.removeEventListener('touchmove', handleTouchMove);
                       document.removeEventListener('touchend', handleTouchEnd);
                       if (hasMoved) {
+                        skipPersistDuringCanvasDragRef.current = false
+                        requestAnimationFrame(() => flushPersistFromSnapshot())
+                        setTimeout(() => saveToHistory(), 50)
                       }
                     };
 
@@ -2295,6 +2433,7 @@ function Note() {
                             isDragging = true;
                             hasMoved = true;
                             setIsDragging(true);
+                            skipPersistDuringCanvasDragRef.current = true;
                             // Blur textarea to stop text selection
                             e.target.blur();
                             // Prevent default to stop text selection
@@ -2319,6 +2458,8 @@ function Note() {
                           document.removeEventListener('mousemove', handleMouseMove);
                           document.removeEventListener('mouseup', handleMouseUp);
                           if (hasMoved && !isRightClickRef.current) {
+                            skipPersistDuringCanvasDragRef.current = false
+                            requestAnimationFrame(() => flushPersistFromSnapshot())
                             setTimeout(() => saveToHistory(), 50)
                           }
                           isRightClickRef.current = false;

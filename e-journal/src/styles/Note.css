@@ -106,11 +106,65 @@
   background-color: rgba(58, 48, 48, 0.05);
 }
 
+.note-stickers-menu-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 220px;
+  padding: 0.35rem;
+}
+
+.note-sticker-collection-tabs {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid #e8e4e4;
+  padding-bottom: 0.35rem;
+  margin-bottom: 0.15rem;
+}
+
+.note-dropdown-menu .note-sticker-collection-tab {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #666;
+  background: #f5f3f3;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: center;
+  justify-content: center;
+  display: flex;
+  align-items: center;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.note-dropdown-menu .note-sticker-collection-tab:hover {
+  background: #ebe8e8;
+  color: #3A3030;
+}
+
+.note-dropdown-menu .note-sticker-collection-tab.active {
+  background: white;
+  color: #3A3030;
+  border-color: #d4c4dc;
+  box-shadow: 0 1px 3px rgba(58, 48, 48, 0.08);
+}
+
 .note-stickers-menu {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 0.5rem;
-  min-width: 200px;
+  min-width: 0;
+}
+
+.note-dropdown-menu .sticker-btn {
+  width: 100%;
+  min-width: 0;
+  justify-content: center;
+  text-align: center;
 }
 
 .sticker-btn {
@@ -594,6 +648,11 @@
 .note-image {
   pointer-events: none;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.note-sticker-host {
+  box-sizing: border-box;
+  pointer-events: auto;
 }
 
 .note-sticker-wrapper {
