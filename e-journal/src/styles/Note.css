@@ -29,6 +29,63 @@
   position: sticky;
   top: 0;
   z-index: 100;
+  overflow: visible;
+}
+
+/* Canva-style hover labels: set data-tooltip="..." on the element */
+.note-nav-controls,
+.note-nav-dropdown {
+  overflow: visible;
+}
+
+/* Tooltips only on the main toolbar (.note-navbar), not inside opened dropdowns */
+.note-navbar [data-tooltip] {
+  position: relative;
+}
+
+.note-nav-tooltip-host {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  position: relative;
+}
+
+.note-nav-tooltip-host > .note-nav-btn:disabled,
+.note-nav-tooltip-host > button:disabled {
+  pointer-events: none;
+}
+
+.note-navbar [data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 8px);
+  bottom: auto;
+  transform: translateX(-50%);
+  padding: 6px 10px;
+  background: rgba(28, 28, 30, 0.92);
+  color: #f4f4f5;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  border-radius: 6px;
+  white-space: nowrap;
+  max-width: min(280px, 70vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.12s ease, visibility 0s linear 0.12s;
+  z-index: 12000;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+  line-height: 1.25;
+}
+
+.note-navbar [data-tooltip]:hover::after {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 0.12s ease 0.35s, visibility 0s linear 0.35s;
 }
 
 .note-nav-btn {
@@ -607,8 +664,79 @@
   box-sizing: border-box;
 }
 
-.note-textbox:focus {
+.note-textbox:focus:not(.note-textbox--postit) {
   background: rgba(255, 255, 255, 0.3);
+}
+
+.note-textbox-wrapper--postit {
+  filter: drop-shadow(2px 4px 10px rgba(58, 48, 48, 0.14));
+}
+
+.note-textbox--postit {
+  border-radius: 2px 2px 2px 14px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    0 1px 2px rgba(58, 48, 48, 0.06);
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+.note-textbox--postit:focus {
+  background-color: var(--postit-bg, #feef9f) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    0 0 0 2px rgba(181, 147, 194, 0.45);
+}
+
+.note-postit-menu {
+  min-width: 200px;
+  padding: 0.65rem 0.75rem 0.5rem;
+}
+
+.note-postit-menu-title {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #888;
+  margin-bottom: 0.5rem;
+}
+
+.note-postit-swatches {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.4rem;
+}
+
+.note-postit-swatch {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 8px;
+  border: 1px solid rgba(58, 48, 48, 0.12);
+  cursor: pointer;
+  padding: 0 !important;
+  display: block !important;
+  text-align: center;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.note-dropdown-menu .note-postit-swatch {
+  min-height: 0;
+  font-size: 0;
+  line-height: 0;
+}
+
+.note-postit-swatch:hover {
+  transform: scale(1.06);
+  box-shadow: 0 2px 8px rgba(58, 48, 48, 0.12);
+}
+
+.note-postit-hint {
+  margin: 0.55rem 0 0;
+  font-size: 0.7rem;
+  color: #999;
+  line-height: 1.35;
 }
 
 .note-shape {

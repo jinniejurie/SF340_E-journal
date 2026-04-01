@@ -22,7 +22,8 @@ import {
   ArrowUp,
   Undo2,
   Redo2,
-  RotateCw
+  RotateCw,
+  StickyNote
 } from 'lucide-react'
 import { auth } from '../services/firebase'
 import { getNoteFromFirestore, saveNoteToFirestore } from '../services/noteService'
@@ -43,6 +44,17 @@ import c2Sticker4 from '../assets/stickers/collection2/work4.svg'
 import c2Sticker5 from '../assets/stickers/collection2/work5.svg'
 import c2Sticker6 from '../assets/stickers/collection2/work6.svg'
 import c2Sticker7 from '../assets/stickers/collection2/work7.svg'
+
+const POSTIT_PALETTE = [
+  { color: '#FEEF9F', label: 'Yellow' },
+  { color: '#FFD6E8', label: 'Pink' },
+  { color: '#C5F0C8', label: 'Green' },
+  { color: '#C4E4FF', label: 'Blue' },
+  { color: '#E6DEFF', label: 'Lavender' },
+  { color: '#FFE1C8', label: 'Peach' },
+  { color: '#F5F5F5', label: 'Gray' },
+  { color: '#1E293B', label: 'Dark', textColor: '#F8FAFC' }
+]
 
 const STICKER_COLLECTIONS = [
   {
@@ -150,6 +162,8 @@ function Note() {
   const [maxZIndex, setMaxZIndex] = useState(1)
   const [showShapesMenu, setShowShapesMenu] = useState(false)
   const [showStickersMenu, setShowStickersMenu] = useState(false)
+  const [showPostItMenu, setShowPostItMenu] = useState(false)
+  const [pendingPostItColor, setPendingPostItColor] = useState(null)
   const [activeStickerCollectionIndex, setActiveStickerCollectionIndex] = useState(0)
   const [showShareMenu, setShowShareMenu] = useState(false)
   const [isAddingTextBox, setIsAddingTextBox] = useState(false)
@@ -181,12 +195,14 @@ function Note() {
       setShowShareMenu(false);
       setShowShapesMenu(false);
       setShowStickersMenu(false);
+      setShowPostItMenu(false);
     } else {
       // If deselecting, close all menus
       setShowColorPicker(false);
       setShowShareMenu(false);
       setShowShapesMenu(false);
       setShowStickersMenu(false);
+      setShowPostItMenu(false);
     }
   };
   const [isDragging, setIsDragging] = useState(false)
@@ -588,6 +604,15 @@ function Note() {
       const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
       const modifier = isMac ? e.metaKey : e.ctrlKey;
 
+      if (e.key === 'Escape') {
+        if (pendingPostItColor || isAddingTextBox || showPostItMenu) {
+          e.preventDefault()
+        }
+        setPendingPostItColor(null)
+        setIsAddingTextBox(false)
+        setShowPostItMenu(false)
+      }
+
       // Delete/Backspace
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedItem && !isEditingTitle) {
         e.preventDefault()
@@ -624,27 +649,61 @@ function Note() {
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [selectedItem, isEditingTitle, clipboard])
+  }, [selectedItem, isEditingTitle, clipboard, pendingPostItColor, isAddingTextBox, showPostItMenu])
 
 
   const handleCanvasClick = (e) => {
-    // Deselect when clicking on canvas (not on any element)
-    if (e.target === canvasRef.current || e.target.classList.contains('note-content')) {
-      handleSelectItem(null);
-      setIsDragging(false);
+    const onCanvasBg = e.target === canvasRef.current || e.target.classList.contains('note-content')
+
+    if (pendingPostItColor && canvasRef.current && onCanvasBg) {
+      const rect = canvasRef.current.getBoundingClientRect()
+      const x = e.clientX - rect.left
+      const y = e.clientY - rect.top
+      const newTextBoxId = Date.now().toString()
+      const newZIndex = maxZIndex + 1
+      const entry = POSTIT_PALETTE.find((p) => p.color === pendingPostItColor) || POSTIT_PALETTE[0]
+      const newTextBox = {
+        id: newTextBoxId,
+        content: '',
+        x,
+        y,
+        width: 200,
+        height: 176,
+        rotation: 0,
+        zIndex: newZIndex,
+        variant: 'postit',
+        postitColor: pendingPostItColor,
+        postitTextColor: entry.textColor || '#2d2a26'
+      }
+      setMaxZIndex(newZIndex)
+      setTextBoxes((prev) => [...prev, newTextBox])
+      handleSelectItem({ type: 'textbox', id: newTextBoxId })
+      setPendingPostItColor(null)
+      setShowPostItMenu(false)
+      setTimeout(() => saveToHistory(), 50)
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          document.querySelector(`textarea[data-textbox-id="${newTextBoxId}"]`)?.focus()
+        })
+      })
+      return
     }
-    
-    // Reset dragging state when clicking on canvas
-    setIsDragging(false);
-    
-    if (!isAddingTextBox || !canvasRef.current) return;
-    
-    const rect = canvasRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    
-    const newTextBoxId = Date.now().toString();
-    const newZIndex = maxZIndex + 1;
+
+    if (onCanvasBg) {
+      handleSelectItem(null)
+      setIsDragging(false)
+    }
+
+    setIsDragging(false)
+
+    if (!isAddingTextBox || !canvasRef.current) return
+
+    const rect = canvasRef.current.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+
+    const newTextBoxId = Date.now().toString()
+    const newZIndex = maxZIndex + 1
     const newTextBox = {
       id: newTextBoxId,
       content: '',
@@ -654,14 +713,14 @@ function Note() {
       height: 100,
       rotation: 0,
       zIndex: newZIndex
-    };
-    
-    setMaxZIndex(newZIndex);
-    setTextBoxes([...textBoxes, newTextBox]);
-    handleSelectItem({ type: 'textbox', id: newTextBoxId });
-    setIsAddingTextBox(false);
+    }
+
+    setMaxZIndex(newZIndex)
+    setTextBoxes([...textBoxes, newTextBox])
+    handleSelectItem({ type: 'textbox', id: newTextBoxId })
+    setIsAddingTextBox(false)
     setTimeout(() => saveToHistory(), 50)
-  };
+  }
 
   const addShape = (type, clickX = null, clickY = null) => {
     let x = 400;
@@ -723,6 +782,7 @@ function Note() {
     setStickers([...stickers, newSticker]);
     handleSelectItem({ type: 'sticker', id: newSticker.id });
     setShowStickersMenu(false);
+    setShowPostItMenu(false);
     setTimeout(() => saveToHistory(), 50)
   };
 
@@ -1452,34 +1512,49 @@ function Note() {
         </div>
       )}
       <div className="note-navbar">
-        <button className="note-nav-btn" onClick={() => {
-          navigate('/calendar');
-        }}>
+        <button
+          type="button"
+          className="note-nav-btn"
+          data-tooltip="Back"
+          aria-label="Back to calendar"
+          onClick={() => {
+            navigate('/calendar');
+          }}
+        >
           <ChevronLeft size={24} />
         </button>
 
         <div className="note-nav-controls">
-          <button 
-            className="note-nav-btn" 
-            onClick={handleUndo}
-            disabled={historyIndex <= 0}
-            title="Undo"
-          >
-            <Undo2 size={20} />
-          </button>
-          <button 
-            className="note-nav-btn" 
-            onClick={handleRedo}
-            disabled={historyIndex >= history.length - 1}
-            title="Redo"
-          >
-            <Redo2 size={20} />
-          </button>
+          <span className="note-nav-tooltip-host" data-tooltip="Undo">
+            <button
+              type="button"
+              className="note-nav-btn"
+              onClick={handleUndo}
+              disabled={historyIndex <= 0}
+              aria-label="Undo"
+            >
+              <Undo2 size={20} />
+            </button>
+          </span>
+          <span className="note-nav-tooltip-host" data-tooltip="Redo">
+            <button
+              type="button"
+              className="note-nav-btn"
+              onClick={handleRedo}
+              disabled={historyIndex >= history.length - 1}
+              aria-label="Redo"
+            >
+              <Redo2 size={20} />
+            </button>
+          </span>
 
           <div className="note-nav-divider" />
 
-          <button 
+          <button
+            type="button"
             className={`note-nav-btn ${isAddingTextBox ? 'active' : ''}`}
+            data-tooltip="Text"
+            aria-label="Add text box"
             onClick={() => {
               const newState = !isAddingTextBox;
               setIsAddingTextBox(newState);
@@ -1487,77 +1562,99 @@ function Note() {
               if (newState) {
                 setShowShapesMenu(false);
                 setShowStickersMenu(false);
+                setShowPostItMenu(false);
+                setPendingPostItColor(null);
                 setShowShareMenu(false);
                 setShowColorPicker(false);
               }
             }}
-            title="Add text box"
           >
             <Type size={20} />
           </button>
 
           <div className="note-nav-dropdown">
-            <button 
+            <button
+              type="button"
               className="note-nav-btn"
+              data-tooltip="Shapes"
+              aria-label="Add shape"
               onClick={() => {
                 const newState = !showShapesMenu;
                 setShowShapesMenu(newState);
                 // Close other menus when opening this menu
                 if (newState) {
                   setShowStickersMenu(false);
+                  setShowPostItMenu(false);
                   setShowShareMenu(false);
                   setShowColorPicker(false);
                 }
               }}
-              title="Add shape"
             >
               <Square size={20} />
             </button>
             {showShapesMenu && (
               <div className="note-dropdown-menu">
-                <button onClick={(e) => {
-                  const clickX = e.clientX;
-                  const clickY = e.clientY;
-                  addShape('rectangle', clickX, clickY);
-                }}><Square size={18} /> Rectangle</button>
-                <button onClick={(e) => {
-                  const clickX = e.clientX;
-                  const clickY = e.clientY;
-                  addShape('circle', clickX, clickY);
-                }}><Circle size={18} /> Circle</button>
-                <button onClick={(e) => {
-                  const clickX = e.clientX;
-                  const clickY = e.clientY;
-                  addShape('triangle', clickX, clickY);
-                }}><Triangle size={18} /> Triangle</button>
-                <button onClick={(e) => {
-                  const clickX = e.clientX;
-                  const clickY = e.clientY;
-                  addShape('star', clickX, clickY);
-                }}><Star size={18} /> Star</button>
-                <button onClick={(e) => {
-                  const clickX = e.clientX;
-                  const clickY = e.clientY;
-                  addShape('line', clickX, clickY);
-                }}><Minus size={18} /> Line</button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    const clickX = e.clientX;
+                    const clickY = e.clientY;
+                    addShape('rectangle', clickX, clickY);
+                  }}
+                ><Square size={18} /> Rectangle</button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    const clickX = e.clientX;
+                    const clickY = e.clientY;
+                    addShape('circle', clickX, clickY);
+                  }}
+                ><Circle size={18} /> Circle</button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    const clickX = e.clientX;
+                    const clickY = e.clientY;
+                    addShape('triangle', clickX, clickY);
+                  }}
+                ><Triangle size={18} /> Triangle</button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    const clickX = e.clientX;
+                    const clickY = e.clientY;
+                    addShape('star', clickX, clickY);
+                  }}
+                ><Star size={18} /> Star</button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    const clickX = e.clientX;
+                    const clickY = e.clientY;
+                    addShape('line', clickX, clickY);
+                  }}
+                ><Minus size={18} /> Line</button>
               </div>
             )}
           </div>
 
           <div className="note-nav-dropdown">
-            <button 
+            <button
+              type="button"
               className="note-nav-btn"
+              data-tooltip="Stickers"
+              aria-label="Add sticker"
               onClick={() => {
                 const newState = !showStickersMenu;
                 setShowStickersMenu(newState);
                 // Close other menus when opening this menu
                 if (newState) {
                   setShowShapesMenu(false);
+                  setShowPostItMenu(false);
                   setShowShareMenu(false);
                   setShowColorPicker(false);
                 }
               }}
-              title="Add sticker"
             >
               <Sticker size={20} />
             </button>
@@ -1600,17 +1697,68 @@ function Note() {
             )}
           </div>
 
-          <button 
+          <div className="note-nav-dropdown">
+            <button
+              type="button"
+              className={`note-nav-btn ${pendingPostItColor ? 'active' : ''}`}
+              data-tooltip="Post-it"
+              aria-label="Post-it notes"
+              onClick={() => {
+                const newState = !showPostItMenu
+                setShowPostItMenu(newState)
+                if (newState) {
+                  setShowShapesMenu(false)
+                  setShowStickersMenu(false)
+                  setShowShareMenu(false)
+                  setShowColorPicker(false)
+                  setIsAddingTextBox(false)
+                }
+              }}
+            >
+              <StickyNote size={20} />
+            </button>
+            {showPostItMenu && (
+              <div className="note-dropdown-menu note-postit-menu" onMouseDown={(e) => e.stopPropagation()}>
+                <div className="note-postit-menu-title">Post-it</div>
+                <div className="note-postit-swatches">
+                  {POSTIT_PALETTE.map((sw) => (
+                    <button
+                      key={sw.color}
+                      type="button"
+                      className="note-postit-swatch"
+                      aria-label={sw.label}
+                      style={{ backgroundColor: sw.color }}
+                      onClick={(ev) => {
+                        ev.stopPropagation()
+                        setPendingPostItColor(sw.color)
+                        setShowPostItMenu(false)
+                        setIsAddingTextBox(false)
+                        setShowShapesMenu(false)
+                        setShowStickersMenu(false)
+                      }}
+                    />
+                  ))}
+                </div>
+                <p className="note-postit-hint">Click on the page to place</p>
+              </div>
+            )}
+          </div>
+
+          <button
+            type="button"
             className="note-nav-btn"
+            data-tooltip="Image"
+            aria-label="Add image"
             onClick={() => {
               // Close all menus when clicking image button
               setShowShapesMenu(false);
               setShowStickersMenu(false);
+              setShowPostItMenu(false);
+              setPendingPostItColor(null);
               setShowShareMenu(false);
               setShowColorPicker(false);
               fileInputRef.current?.click();
             }}
-            title="Add image"
           >
             <ImageIcon size={20} />
           </button>
@@ -1626,8 +1774,11 @@ function Note() {
             <>
               <div className="note-nav-divider" />
               <div className="note-nav-dropdown">
-                <button 
+                <button
+                  type="button"
                   className="note-nav-btn"
+                  data-tooltip="Color"
+                  aria-label="Customize shape color"
                   onClick={() => {
                     const newState = !showColorPicker;
                     setShowColorPicker(newState);
@@ -1636,9 +1787,9 @@ function Note() {
                       setShowShareMenu(false);
                       setShowShapesMenu(false);
                       setShowStickersMenu(false);
+                      setShowPostItMenu(false);
                     }
                   }}
-                  title="Customize shape"
                 >
                   <Palette size={20} />
                 </button>
@@ -1651,8 +1802,10 @@ function Note() {
                         value={getSelectedShape().fillColor === 'transparent' ? '#FFFFFF' : getSelectedShape().fillColor}
                         onChange={(e) => updateShapeColor(selectedItem.id, e.target.value, getSelectedShape().strokeColor)}
                       />
-                      <button 
+                      <button
+                        type="button"
                         className="transparent-btn"
+                        aria-label="No fill"
                         onClick={() => updateShapeColor(selectedItem.id, 'transparent', getSelectedShape().strokeColor)}
                       >
                         None
@@ -1687,8 +1840,11 @@ function Note() {
           <div className="note-nav-divider" />
 
           <div className="note-nav-dropdown">
-            <button 
+            <button
+              type="button"
               className="note-nav-btn"
+              data-tooltip="Share"
+              aria-label="Share"
               onClick={() => {
                 const newState = !showShareMenu;
                 setShowShareMenu(newState);
@@ -1697,16 +1853,16 @@ function Note() {
                   setShowColorPicker(false);
                   setShowShapesMenu(false);
                   setShowStickersMenu(false);
+                  setShowPostItMenu(false);
                 }
               }}
-              title="Share"
             >
               <Share2 size={20} />
             </button>
             {showShareMenu && (
               <div className="note-dropdown-menu">
-                <button onClick={shareAsLink}><Copy size={16} /> Copy Link</button>
-                <button onClick={downloadAsPDF}><Download size={16} /> Download PDF</button>
+                <button type="button" onClick={shareAsLink}><Copy size={16} /> Copy Link</button>
+                <button type="button" onClick={downloadAsPDF}><Download size={16} /> Download PDF</button>
               </div>
             )}
           </div>
@@ -1725,6 +1881,7 @@ function Note() {
             setIsCreatingNewTag(false);
             setShowShapesMenu(false);
             setShowStickersMenu(false);
+            setShowPostItMenu(false);
             setShowShareMenu(false);
             setShowColorPicker(false);
             handleSelectItem(null);
@@ -1737,7 +1894,7 @@ function Note() {
             handleSelectItem(null);
           }
         }}
-        style={{ cursor: isAddingTextBox ? 'crosshair' : 'default' }}
+        style={{ cursor: isAddingTextBox || pendingPostItColor ? 'crosshair' : 'default' }}
       >
         <div className="note-header">
           <div className="note-header-left">
@@ -1761,11 +1918,16 @@ function Note() {
             {showTagSelector ? (
               <div className="note-tag-selector" onClick={(e) => e.stopPropagation()}>
                 <div className="tag-selector-header">
-                  <button className="back-btn" onClick={(e) => {
-                    e.stopPropagation();
-                    setShowTagSelector(false);
-                    setIsCreatingNewTag(false);
-                  }}>←</button>
+                  <button
+                    type="button"
+                    className="back-btn"
+                    aria-label="Close tag selector"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowTagSelector(false);
+                      setIsCreatingNewTag(false);
+                    }}
+                  >←</button>
                   <h4>Select Tag</h4>
                 </div>
                 {!isCreatingNewTag ? (
@@ -1785,7 +1947,8 @@ function Note() {
                         </div>
                       ))}
                     </div>
-                    <button 
+                    <button
+                      type="button"
                       className="create-tag-btn"
                       onClick={(e) => {
                         e.stopPropagation();
@@ -1819,7 +1982,8 @@ function Note() {
                       />
                       <span style={{ fontSize: '0.85rem', color: '#666' }}>Color</span>
                     </div>
-                    <button 
+                    <button
+                      type="button"
                       className="save-tag-btn"
                       onClick={(e) => {
                         e.stopPropagation();
@@ -1833,14 +1997,22 @@ function Note() {
                 )}
               </div>
             ) : (
-              <div 
-                className="note-tag" 
+              <div
+                className="note-tag"
                 style={{ backgroundColor: tagColor }}
+                role="button"
+                aria-label="Select or create tag"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setShowTagSelector(true);
+                  }
+                }}
                 onClick={(e) => {
                   e.stopPropagation();
                   setShowTagSelector(true);
                 }}
-                title="Click to select or create tag"
               >
                 {tagName}
               </div>
@@ -2279,6 +2451,9 @@ function Note() {
               // textbox
               const textBox = element;
               const isSelected = selectedItem?.type === 'textbox' && selectedItem.id === textBox.id;
+              const isPostit = textBox.variant === 'postit'
+              const postitBg = textBox.postitColor || '#FEEF9F'
+              const postitFg = textBox.postitTextColor || '#2d2a26'
               return (
               <Resizable
                 key={textBox.id}
@@ -2296,7 +2471,7 @@ function Note() {
                   setIsResizing(false);
                   setTimeout(() => saveToHistory(), 50)
                 }}
-                className={`note-textbox-wrapper ${isSelected ? 'selected' : ''}`}
+                className={`note-textbox-wrapper ${isSelected ? 'selected' : ''}${isPostit ? ' note-textbox-wrapper--postit' : ''}`}
                 style={{
                   position: 'absolute',
                   left: textBox.x,
@@ -2499,8 +2674,20 @@ function Note() {
                 >
                   <div style={{ width: '100%', height: '100%', position: 'relative' }}>
                     <textarea
-                      className="note-textbox"
+                      data-textbox-id={textBox.id}
+                      className={`note-textbox${isPostit ? ' note-textbox--postit' : ''}`}
                       value={textBox.content}
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        ...(isPostit
+                          ? {
+                              backgroundColor: postitBg,
+                              color: postitFg,
+                              ['--postit-bg']: postitBg
+                            }
+                          : {})
+                      }}
                       onChange={(e) => {
                         setTextBoxes(textBoxes.map(tb => 
                           tb.id === textBox.id ? { ...tb, content: e.target.value } : tb
@@ -2614,8 +2801,7 @@ function Note() {
                         e.target.focus();
                         e.target.select();
                       }}
-                      placeholder="Type here..."
-                      style={{ width: '100%', height: '100%' }}
+                      placeholder={isPostit ? 'Note' : 'Type here...'}
                     />
                     {isSelected && (
                       <>
