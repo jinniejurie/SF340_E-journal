@@ -21,7 +21,8 @@ import {
   ArrowDown,
   ArrowUp,
   Undo2,
-  Redo2
+  Redo2,
+  RotateCw
 } from 'lucide-react'
 import { auth } from '../services/firebase'
 import { getNoteFromFirestore, saveNoteToFirestore } from '../services/noteService'
@@ -67,10 +68,10 @@ function getNoteFromLocalStorage(storageKey) {
       title: data.title ?? '',
       tagName: data.tagName ?? '',
       tagColor: data.tagColor ?? '#FF6B6B',
-      textBoxes: Array.isArray(data.textBoxes) ? data.textBoxes : [],
-      shapes: Array.isArray(data.shapes) ? data.shapes : [],
-      images: Array.isArray(data.images) ? data.images : [],
-      stickers: Array.isArray(data.stickers) ? data.stickers : [],
+      textBoxes: withDefaultRotation(data.textBoxes),
+      shapes: withDefaultRotation(data.shapes),
+      images: withDefaultRotation(data.images),
+      stickers: withDefaultRotation(data.stickers),
       maxZIndex: typeof data.maxZIndex === 'number' ? data.maxZIndex : 1
     }
   } catch (e) {}
@@ -81,6 +82,20 @@ function saveNoteToLocalStorage(storageKey, payload) {
   try {
     localStorage.setItem(NOTE_STORAGE_KEY(storageKey), JSON.stringify(payload))
   } catch (e) {}
+}
+
+function withDefaultRotation(items) {
+  if (!Array.isArray(items)) return []
+  return items.map((it) => ({
+    ...it,
+    rotation: typeof it.rotation === 'number' && !Number.isNaN(it.rotation) ? it.rotation : 0
+  }))
+}
+
+function normalizeDisplay360(deg) {
+  let d = Math.round(deg) % 360
+  if (d < 0) d += 360
+  return d
 }
 
 function Note() {
@@ -176,6 +191,7 @@ function Note() {
   };
   const [isDragging, setIsDragging] = useState(false)
   const [isResizing, setIsResizing] = useState(false)
+  const [rotationHud, setRotationHud] = useState(null)
   const [contextMenu, setContextMenu] = useState(null)
   const [clipboard, setClipboard] = useState(null)
   const [isContextMenuOpen, setIsContextMenuOpen] = useState(false)
@@ -185,6 +201,7 @@ function Note() {
   const isRightClickRef = useRef(false)
   const stickerHostElementsRef = useRef(new Map())
   const stickerDragCleanupRef = useRef(null)
+  const activeRotationDragRef = useRef(null)
   const skipPersistDuringCanvasDragRef = useRef(false)
   const persistSnapshotRef = useRef(null)
   const FIRESTORE_DEBOUNCE_MS = 2000
@@ -240,10 +257,10 @@ function Note() {
       if (data.title !== undefined) setTitle(data.title)
       if (data.tagName !== undefined) setTagName(data.tagName)
       if (data.tagColor !== undefined) setTagColor(data.tagColor)
-      if (Array.isArray(data.textBoxes)) setTextBoxes(data.textBoxes)
-      if (Array.isArray(data.shapes)) setShapes(data.shapes)
-      if (Array.isArray(data.images)) setImages(data.images)
-      if (Array.isArray(data.stickers)) setStickers(data.stickers)
+      if (Array.isArray(data.textBoxes)) setTextBoxes(withDefaultRotation(data.textBoxes))
+      if (Array.isArray(data.shapes)) setShapes(withDefaultRotation(data.shapes))
+      if (Array.isArray(data.images)) setImages(withDefaultRotation(data.images))
+      if (Array.isArray(data.stickers)) setStickers(withDefaultRotation(data.stickers))
       if (typeof data.maxZIndex === 'number') setMaxZIndex(data.maxZIndex)
     }
 
@@ -635,6 +652,7 @@ function Note() {
       y,
       width: 200,
       height: 100,
+      rotation: 0,
       zIndex: newZIndex
     };
     
@@ -667,6 +685,7 @@ function Note() {
       fillColor: 'transparent',
       strokeColor: '#3A3030',
       strokeWidth: 2,
+      rotation: 0,
       zIndex: newZIndex
     };
     
@@ -761,6 +780,12 @@ function Note() {
     const stickerCleanup = stickerDragCleanupRef.current
     stickerDragCleanupRef.current = null
     stickerCleanup?.()
+    if (activeRotationDragRef.current) {
+      document.removeEventListener('mousemove', activeRotationDragRef.current.move)
+      document.removeEventListener('mouseup', activeRotationDragRef.current.up)
+      activeRotationDragRef.current = null
+      setRotationHud(null)
+    }
     if (skipPersistDuringCanvasDragRef.current) {
       skipPersistDuringCanvasDragRef.current = false
       requestAnimationFrame(() => flushPersistFromSnapshot())
@@ -781,6 +806,52 @@ function Note() {
       activeDragHandlersRef.current.contextMenu = null;
     }
   };
+
+  const startRotateDrag = (e, box, rotation, setRotationDeg) => {
+    e.stopPropagation()
+    e.preventDefault()
+    stopAllDragging()
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const cr = canvas.getBoundingClientRect()
+    const cx = cr.left + box.x + box.w / 2
+    const cy = cr.top + box.y + box.h / 2
+    const startRad = Math.atan2(e.clientY - cy, e.clientX - cx)
+    const startRot = typeof rotation === 'number' && !Number.isNaN(rotation) ? rotation : 0
+    skipPersistDuringCanvasDragRef.current = true
+
+    const onMove = (ev) => {
+      ev.preventDefault()
+      const rad = Math.atan2(ev.clientY - cy, ev.clientX - cx)
+      let dr = rad - startRad
+      if (dr > Math.PI) dr -= 2 * Math.PI
+      if (dr < -Math.PI) dr += 2 * Math.PI
+      const nextDeg = startRot + dr * (180 / Math.PI)
+      setRotationDeg(nextDeg)
+      setRotationHud({
+        clientX: ev.clientX,
+        clientY: ev.clientY,
+        degrees: normalizeDisplay360(nextDeg)
+      })
+    }
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      activeRotationDragRef.current = null
+      setRotationHud(null)
+      skipPersistDuringCanvasDragRef.current = false
+      requestAnimationFrame(() => flushPersistFromSnapshot())
+      setTimeout(() => saveToHistory(), 50)
+    }
+    activeRotationDragRef.current = { move: onMove, up: onUp }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+    setRotationHud({
+      clientX: e.clientX,
+      clientY: e.clientY,
+      degrees: normalizeDisplay360(startRot)
+    })
+  }
 
   // Context menu functions
   const handleContextMenu = (e, item) => {
@@ -1161,7 +1232,9 @@ function Note() {
           position: 'absolute',
           left: shape.x,
           top: shape.y,
-          zIndex: shape.zIndex || 1
+          zIndex: shape.zIndex || 1,
+          transform: `rotate(${shape.rotation ?? 0}deg)`,
+          transformOrigin: 'center center'
         }}
         onResizeStart={() => {
           setIsResizing(true);
@@ -1218,6 +1291,8 @@ function Note() {
               handleSelectItem({ type: 'shape', id: shape.id });
               return;
             }
+            if (e.target.closest('.note-rotate-handle')) return;
+            if (e.target.closest('.note-delete-btn')) return;
             e.stopPropagation();
             handleSelectItem({ type: 'shape', id: shape.id });
             
@@ -1323,6 +1398,19 @@ function Note() {
         </div>
         {isSelected && (
           <>
+            <button
+              type="button"
+              className="note-rotate-handle"
+              aria-label="Rotate"
+              onMouseDown={(e) => startRotateDrag(
+                e,
+                { x: shape.x, y: shape.y, w: shape.width, h: shape.height },
+                shape.rotation,
+                (deg) => setShapes((prev) => prev.map((s) => (s.id === shape.id ? { ...s, rotation: deg } : s)))
+              )}
+            >
+              <RotateCw size={14} />
+            </button>
             <button
               className="note-delete-btn"
               onClick={() => deleteShape(shape.id)}
@@ -1793,7 +1881,9 @@ function Note() {
                       position: 'absolute',
                       left: image.x,
                       top: image.y,
-                      zIndex: image.zIndex || 1
+                      zIndex: image.zIndex || 1,
+                      transform: `rotate(${image.rotation ?? 0}deg)`,
+                      transformOrigin: 'center center'
                     }}
                     enable={{
                       top: true,
@@ -1840,6 +1930,9 @@ function Note() {
                         
                         // Don't drag if clicking on delete button
                         if (e.target.closest('.note-delete-btn')) {
+                          return;
+                        }
+                        if (e.target.closest('.note-rotate-handle')) {
                           return;
                         }
                         
@@ -1908,13 +2001,25 @@ function Note() {
                           width: '100%',
                           height: '100%',
                           objectFit: 'cover',
-                          transform: `rotate(${image.rotation}deg)`,
                           pointerEvents: 'none'
                         }}
                       />
                     </div>
                     {isSelected && (
                       <>
+                        <button
+                          type="button"
+                          className="note-rotate-handle"
+                          aria-label="Rotate"
+                          onMouseDown={(e) => startRotateDrag(
+                            e,
+                            { x: image.x, y: image.y, w: image.width, h: image.height },
+                            image.rotation,
+                            (deg) => setImages((prev) => prev.map((img) => (img.id === image.id ? { ...img, rotation: deg } : img)))
+                          )}
+                        >
+                          <RotateCw size={14} />
+                        </button>
                         <button
                           className="note-delete-btn"
                           onClick={() => deleteImage(image.id)}
@@ -1961,7 +2066,9 @@ function Note() {
                       zIndex: sticker.zIndex || 1,
                       width: sticker.width,
                       height: sticker.height,
-                      willChange: 'transform'
+                      willChange: 'transform',
+                      transform: `rotate(${sticker.rotation ?? 0}deg)`,
+                      transformOrigin: 'center center'
                     }}
                     ref={(el) => {
                       if (el) stickerHostElementsRef.current.set(sid, el)
@@ -2036,6 +2143,9 @@ function Note() {
                         if (e.target.closest('.note-delete-btn')) {
                           return;
                         }
+                        if (e.target.closest('.note-rotate-handle')) {
+                          return;
+                        }
                         
                         e.stopPropagation();
                         e.preventDefault();
@@ -2045,12 +2155,13 @@ function Note() {
                         const startY = e.clientY;
                         const startPosX = sticker.x;
                         const startPosY = sticker.y;
+                        const dragRot = sticker.rotation ?? 0;
                         let hasMoved = false;
                         const dragDelta = { dx: 0, dy: 0 };
 
                         stickerDragCleanupRef.current = () => {
                           const host = stickerHostElementsRef.current.get(sid)
-                          if (host) host.style.transform = ''
+                          if (host) host.style.transform = `rotate(${dragRot}deg)`
                         }
 
                         const handleStickerDragMove = (moveEvent) => {
@@ -2067,7 +2178,7 @@ function Note() {
                           dragDelta.dy = moveEvent.clientY - startY;
                           const host = stickerHostElementsRef.current.get(sid)
                           if (host) {
-                            host.style.transform = `translate(${dragDelta.dx}px, ${dragDelta.dy}px)`
+                            host.style.transform = `translate(${dragDelta.dx}px, ${dragDelta.dy}px) rotate(${dragRot}deg)`
                           }
                         };
 
@@ -2112,13 +2223,25 @@ function Note() {
                           width: '100%',
                           height: '100%',
                           objectFit: 'contain',
-                          transform: `rotate(${sticker.rotation}deg)`,
                           pointerEvents: 'none'
                         }}
                       />
                     </div>
                     {isSelected && (
                       <>
+                        <button
+                          type="button"
+                          className="note-rotate-handle"
+                          aria-label="Rotate"
+                          onMouseDown={(e) => startRotateDrag(
+                            e,
+                            { x: sticker.x, y: sticker.y, w: sticker.width, h: sticker.height },
+                            sticker.rotation,
+                            (deg) => setStickers((prev) => prev.map((s) => (s.id === sid ? { ...s, rotation: deg } : s)))
+                          )}
+                        >
+                          <RotateCw size={14} />
+                        </button>
                         <button
                           className="note-delete-btn"
                           onClick={() => deleteSticker(sticker.id)}
@@ -2178,7 +2301,9 @@ function Note() {
                   position: 'absolute',
                   left: textBox.x,
                   top: textBox.y,
-                  zIndex: textBox.zIndex || 1
+                  zIndex: textBox.zIndex || 1,
+                  transform: `rotate(${textBox.rotation ?? 0}deg)`,
+                  transformOrigin: 'center center'
                 }}
                 enable={{
                   top: true,
@@ -2241,6 +2366,9 @@ function Note() {
                     
                     // Don't drag if clicking on delete button
                     if (e.target.closest('.note-delete-btn')) {
+                      return;
+                    }
+                    if (e.target.closest('.note-rotate-handle')) {
                       return;
                     }
                     
@@ -2492,6 +2620,19 @@ function Note() {
                     {isSelected && (
                       <>
                         <button
+                          type="button"
+                          className="note-rotate-handle"
+                          aria-label="Rotate"
+                          onMouseDown={(e) => startRotateDrag(
+                            e,
+                            { x: textBox.x, y: textBox.y, w: textBox.width, h: textBox.height },
+                            textBox.rotation,
+                            (deg) => setTextBoxes((prev) => prev.map((tb) => (tb.id === textBox.id ? { ...tb, rotation: deg } : tb)))
+                          )}
+                        >
+                          <RotateCw size={14} />
+                        </button>
+                        <button
                           className="note-delete-btn"
                           onClick={() => deleteTextBox(textBox.id)}
                           style={{ top: '-12px', left: '-12px' }}
@@ -2527,6 +2668,17 @@ function Note() {
           })}
         </div>
       </div>
+
+      {rotationHud && (
+        <div
+          className="note-rotation-hud"
+          style={{ left: rotationHud.clientX, top: rotationHud.clientY }}
+          role="status"
+          aria-live="polite"
+        >
+          {rotationHud.degrees}°
+        </div>
+      )}
 
       {/* Context Menu */}
       {contextMenu && (
