@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react'
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import { Resizable } from 're-resizable'
 import { 
@@ -23,7 +23,11 @@ import {
   Undo2,
   Redo2,
   RotateCw,
-  StickyNote
+  StickyNote,
+  Bold,
+  Italic,
+  Strikethrough,
+  Highlighter
 } from 'lucide-react'
 import { auth } from '../services/firebase'
 import { getNoteFromFirestore, saveNoteToFirestore } from '../services/noteService'
@@ -69,7 +73,307 @@ const STICKER_COLLECTIONS = [
   }
 ]
 
+const TEXT_FORE_PALETTE = [
+  '#3A3030',
+  '#1e293b',
+  '#dc2626',
+  '#ea580c',
+  '#ca8a04',
+  '#16a34a',
+  '#2563eb',
+  '#7c3aed',
+  '#db2777',
+  '#ffffff'
+]
+
+const TEXT_HIGHLIGHT_PALETTE = [
+  '#FFF59D',
+  '#FDE68A',
+  '#FECACA',
+  '#FED7AA',
+  '#BBF7D0',
+  '#BFDBFE',
+  '#DDD6FE',
+  '#FBCFE8',
+  '#E5E5E5',
+  '#FFFFFF'
+]
+
 const NOTE_STORAGE_KEY = (id) => `ejournal-note-${id ?? 'draft'}`
+
+function escapeHtml(text) {
+  if (text == null) return ''
+  const d = document.createElement('div')
+  d.textContent = String(text)
+  return d.innerHTML
+}
+
+/** Plain text or legacy notes → HTML for contentEditable */
+function contentToEditableHtml(raw) {
+  if (raw == null || raw === '') return '<p><br></p>'
+  const s = String(raw)
+  const t = s.trim()
+  if (t && /<[a-z][\s\S]*>/i.test(t)) return s
+  return `<p>${escapeHtml(s).replace(/\n/g, '<br>')}</p>`
+}
+
+/** Persist empty editors as '' so undo/load stays consistent */
+function normalizeEditorStorage(html) {
+  if (html == null || html === '' || html === '<br>') return ''
+  const t = document.createElement('div')
+  t.innerHTML = html
+  const text = t.textContent?.replace(/\u200b/g, '').trim() ?? ''
+  if (!text) return ''
+  return html
+}
+
+function getNonCollapsedSelectionRectInEditor(root) {
+  const sel = window.getSelection()
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null
+  const range = sel.getRangeAt(0)
+  if (!root.contains(range.commonAncestorContainer)) return null
+  const r = range.getBoundingClientRect()
+  if (r.width === 0 && r.height === 0) return null
+  return r
+}
+
+const INITIAL_TOOLBAR_INLINE_FORMATS = {
+  bold: false,
+  italic: false,
+  strikeThrough: false
+}
+
+function readInlineFormatState() {
+  try {
+    return {
+      bold: document.queryCommandState('bold'),
+      italic: document.queryCommandState('italic'),
+      strikeThrough:
+        document.queryCommandState('strikeThrough') ||
+        document.queryCommandState('strikethrough')
+    }
+  } catch {
+    return { ...INITIAL_TOOLBAR_INLINE_FORMATS }
+  }
+}
+
+function NoteTextEditor({
+  textBox,
+  isPostit,
+  postitBg,
+  postitFg,
+  textChangeTimeoutRef,
+  saveToHistory,
+  setTextBoxes,
+  setTextToolbar,
+  setToolbarInlineFormats,
+  handleSelectItem,
+  isContextMenuOpen,
+  isRightClickRef,
+  stopAllDragging,
+  setIsDragging,
+  skipPersistDuringCanvasDragRef,
+  flushPersistFromSnapshot,
+  handleContextMenu
+}) {
+  const elRef = useRef(null)
+  const lastCommittedHtml = useRef(null)
+
+  useLayoutEffect(() => {
+    lastCommittedHtml.current = null
+  }, [textBox.id])
+
+  useLayoutEffect(() => {
+    const el = elRef.current
+    if (!el) return
+    if (lastCommittedHtml.current === null) {
+      el.innerHTML = contentToEditableHtml(textBox.content)
+      lastCommittedHtml.current = textBox.content
+      el.classList.toggle('note-textbox-editor--empty', !el.textContent?.replace(/\u200b/g, '').trim())
+      return
+    }
+    if (textBox.content !== lastCommittedHtml.current) {
+      el.innerHTML = contentToEditableHtml(textBox.content)
+      lastCommittedHtml.current = textBox.content
+      el.classList.toggle('note-textbox-editor--empty', !el.textContent?.replace(/\u200b/g, '').trim())
+    }
+  }, [textBox.content, textBox.id])
+
+  const pushHtml = (html) => {
+    const stored = normalizeEditorStorage(html)
+    lastCommittedHtml.current = stored
+    setTextBoxes((prev) =>
+      prev.map((tb) => (tb.id === textBox.id ? { ...tb, content: stored } : tb))
+    )
+    if (textChangeTimeoutRef.current) clearTimeout(textChangeTimeoutRef.current)
+    textChangeTimeoutRef.current = setTimeout(() => {
+      saveToHistory()
+    }, 500)
+  }
+
+  return (
+    <div
+      ref={elRef}
+      role="textbox"
+      tabIndex={0}
+      contentEditable
+      suppressContentEditableWarning
+      data-textbox-editor
+      data-textbox-id={textBox.id}
+      className={`note-textbox note-textbox-editor${isPostit ? ' note-textbox--postit' : ''}`}
+      data-placeholder={isPostit ? 'Note' : 'Type here...'}
+      style={{
+        width: '100%',
+        height: '100%',
+        ...(isPostit
+          ? {
+              backgroundColor: postitBg,
+              color: postitFg,
+              ['--postit-bg']: postitBg
+            }
+          : {})
+      }}
+      onInput={(e) => {
+        const html = e.currentTarget.innerHTML
+        pushHtml(html)
+        e.currentTarget.classList.toggle(
+          'note-textbox-editor--empty',
+          !e.currentTarget.textContent?.replace(/\u200b/g, '').trim()
+        )
+        const rect = getNonCollapsedSelectionRectInEditor(e.currentTarget)
+        if (rect) {
+          setTextToolbar({
+            top: rect.bottom + 8,
+            left: rect.left + rect.width / 2,
+            textBoxId: textBox.id
+          })
+          setToolbarInlineFormats(readInlineFormatState())
+        } else {
+          setTextToolbar(null)
+          setToolbarInlineFormats(INITIAL_TOOLBAR_INLINE_FORMATS)
+        }
+      }}
+      onFocus={() => handleSelectItem({ type: 'textbox', id: textBox.id })}
+      onBlur={() => {
+        if (textChangeTimeoutRef.current) {
+          clearTimeout(textChangeTimeoutRef.current)
+          textChangeTimeoutRef.current = null
+        }
+        setTimeout(() => saveToHistory(), 50)
+        setTimeout(() => {
+          const a = document.activeElement
+          if (!a?.hasAttribute?.('data-textbox-editor') && !a?.closest?.('.note-text-format-toolbar')) {
+            setTextToolbar(null)
+            setToolbarInlineFormats(INITIAL_TOOLBAR_INLINE_FORMATS)
+          }
+        }, 0)
+      }}
+      onMouseUp={(e) => {
+        const el = e.currentTarget
+        const rect = getNonCollapsedSelectionRectInEditor(el)
+        if (rect) {
+          setTextToolbar({
+            top: rect.bottom + 8,
+            left: rect.left + rect.width / 2,
+            textBoxId: textBox.id
+          })
+          setToolbarInlineFormats(readInlineFormatState())
+        }
+      }}
+      onKeyUp={(e) => {
+        const el = e.currentTarget
+        const rect = getNonCollapsedSelectionRectInEditor(el)
+        if (rect) {
+          setTextToolbar({
+            top: rect.bottom + 8,
+            left: rect.left + rect.width / 2,
+            textBoxId: textBox.id
+          })
+          setToolbarInlineFormats(readInlineFormatState())
+        } else if (window.getSelection()?.isCollapsed) {
+          setTextToolbar(null)
+          setToolbarInlineFormats(INITIAL_TOOLBAR_INLINE_FORMATS)
+        }
+      }}
+      onMouseDown={(e) => {
+        if (e.button === 2) {
+          isRightClickRef.current = true
+          stopAllDragging()
+          return
+        }
+        handleSelectItem({ type: 'textbox', id: textBox.id })
+        stopAllDragging()
+        isRightClickRef.current = false
+        const startX = e.clientX
+        const startY = e.clientY
+        const startPosX = textBox.x
+        const startPosY = textBox.y
+        let hasMoved = false
+        let dragging = false
+
+        const handleMouseMove = (moveEvent) => {
+          if (isRightClickRef.current || isContextMenuOpen) {
+            stopAllDragging()
+            return
+          }
+          const deltaX = Math.abs(moveEvent.clientX - startX)
+          const deltaY = Math.abs(moveEvent.clientY - startY)
+          if ((deltaX > 5 || deltaY > 5) && !dragging) {
+            dragging = true
+            hasMoved = true
+            setIsDragging(true)
+            skipPersistDuringCanvasDragRef.current = true
+            elRef.current?.blur()
+            moveEvent.preventDefault()
+          }
+          if (dragging) {
+            moveEvent.preventDefault()
+            const finalDeltaX = moveEvent.clientX - startX
+            const finalDeltaY = moveEvent.clientY - startY
+            setTextBoxes((prevTextBoxes) =>
+              prevTextBoxes.map((tb) =>
+                tb.id === textBox.id
+                  ? { ...tb, x: startPosX + finalDeltaX, y: startPosY + finalDeltaY }
+                  : tb
+              )
+            )
+          }
+        }
+
+        const handleMouseUp = () => {
+          setIsDragging(false)
+          document.removeEventListener('mousemove', handleMouseMove)
+          document.removeEventListener('mouseup', handleMouseUp)
+          if (hasMoved && !isRightClickRef.current) {
+            skipPersistDuringCanvasDragRef.current = false
+            requestAnimationFrame(() => flushPersistFromSnapshot())
+            setTimeout(() => saveToHistory(), 50)
+          }
+          isRightClickRef.current = false
+        }
+
+        const contextMenuHandler = () => {
+          isRightClickRef.current = true
+          stopAllDragging()
+        }
+
+        document.addEventListener('mousemove', handleMouseMove)
+        document.addEventListener('mouseup', handleMouseUp)
+        document.addEventListener('contextmenu', contextMenuHandler, { once: true })
+      }}
+      onContextMenu={(e) => {
+        e.stopPropagation()
+        isRightClickRef.current = true
+        stopAllDragging()
+        handleContextMenu(e, { type: 'textbox', id: textBox.id })
+      }}
+      onDoubleClick={(e) => {
+        e.stopPropagation()
+        e.currentTarget.focus()
+      }}
+    />
+  )
+}
 
 function getNoteFromLocalStorage(storageKey) {
   try {
@@ -178,7 +482,10 @@ function Note() {
   const [historyIndex, setHistoryIndex] = useState(-1)
   const isRestoringRef = useRef(false)
   const textChangeTimeoutRef = useRef(null)
-  
+  const [textToolbar, setTextToolbar] = useState(null)
+  const [formatPaletteOpen, setFormatPaletteOpen] = useState(null)
+  const [toolbarInlineFormats, setToolbarInlineFormats] = useState(INITIAL_TOOLBAR_INLINE_FORMATS)
+
   // Close menus when selecting different item type
   const handleSelectItem = (item) => {
     setSelectedItem(item);
@@ -412,6 +719,76 @@ function Note() {
     setHistoryIndex(prev => Math.min(prev + 1, 49))
   }
 
+  const applyRichTextCommand = useCallback(
+    (textBoxId, command, value = null) => {
+      const el = document.querySelector(`[data-textbox-editor][data-textbox-id="${textBoxId}"]`)
+      if (!el) return
+      el.focus()
+      try {
+        document.execCommand('styleWithCSS', false, 'true')
+      } catch (_) {}
+      try {
+        document.execCommand(command, false, value)
+      } catch (_) {}
+      const stored = normalizeEditorStorage(el.innerHTML)
+      setTextBoxes((prev) =>
+        prev.map((tb) => (tb.id === textBoxId ? { ...tb, content: stored } : tb))
+      )
+      if (textChangeTimeoutRef.current) clearTimeout(textChangeTimeoutRef.current)
+      textChangeTimeoutRef.current = setTimeout(() => saveToHistory(), 400)
+      requestAnimationFrame(() => {
+        const rect = getNonCollapsedSelectionRectInEditor(el)
+        if (rect) {
+          setTextToolbar({
+            top: rect.bottom + 8,
+            left: rect.left + rect.width / 2,
+            textBoxId
+          })
+        }
+        setToolbarInlineFormats(readInlineFormatState())
+      })
+    },
+    [saveToHistory]
+  )
+
+  const applyTextHighlight = useCallback(
+    (textBoxId, color) => {
+      const el = document.querySelector(`[data-textbox-editor][data-textbox-id="${textBoxId}"]`)
+      if (!el) return
+      el.focus()
+      try {
+        document.execCommand('styleWithCSS', false, 'true')
+      } catch (_) {}
+      let ok = false
+      try {
+        ok = document.execCommand('hiliteColor', false, color)
+      } catch (_) {}
+      if (!ok) {
+        try {
+          document.execCommand('backColor', false, color)
+        } catch (_) {}
+      }
+      const stored = normalizeEditorStorage(el.innerHTML)
+      setTextBoxes((prev) =>
+        prev.map((tb) => (tb.id === textBoxId ? { ...tb, content: stored } : tb))
+      )
+      if (textChangeTimeoutRef.current) clearTimeout(textChangeTimeoutRef.current)
+      textChangeTimeoutRef.current = setTimeout(() => saveToHistory(), 400)
+      requestAnimationFrame(() => {
+        const rect = getNonCollapsedSelectionRectInEditor(el)
+        if (rect) {
+          setTextToolbar({
+            top: rect.bottom + 8,
+            left: rect.left + rect.width / 2,
+            textBoxId
+          })
+        }
+        setToolbarInlineFormats(readInlineFormatState())
+      })
+    },
+    [saveToHistory]
+  )
+
   const handleUndo = () => {
     if (historyIndex > 0) {
       isRestoringRef.current = true
@@ -574,35 +951,27 @@ function Note() {
   // Handle keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e) => {
-      // Don't trigger shortcuts when typing in inputs/textareas
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
-        // Allow normal typing, but still handle Ctrl+A, Ctrl+C, Ctrl+V, Ctrl+X in textareas
-        if (e.target.tagName === 'TEXTAREA') {
-          const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-          const modifier = isMac ? e.metaKey : e.ctrlKey;
-          
-          if (modifier && e.key === 'c') {
-            // Copy text in textarea - let browser handle it
-            return;
-          }
-          if (modifier && e.key === 'v') {
-            // Paste text in textarea - let browser handle it
-            return;
-          }
-          if (modifier && e.key === 'x') {
-            // Cut text in textarea - let browser handle it
-            return;
-          }
-          if (modifier && e.key === 'a') {
-            // Select all text in textarea - let browser handle it
-            return;
+      const inRichText = e.target.closest?.('[data-textbox-editor]')
+
+      // Don't trigger canvas shortcuts when typing in inputs / textarea / rich text box
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || inRichText) {
+        if (inRichText && e.key === 'Escape') {
+          setTextToolbar(null)
+          setToolbarInlineFormats(INITIAL_TOOLBAR_INLINE_FORMATS)
+        }
+        if (e.target.tagName === 'TEXTAREA' || inRichText) {
+          const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0
+          const modifier = isMac ? e.metaKey : e.ctrlKey
+
+          if (modifier && ['c', 'v', 'x', 'a', 'b', 'i', 'u'].includes(e.key.toLowerCase())) {
+            return
           }
         }
-        return;
+        return
       }
 
-      const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-      const modifier = isMac ? e.metaKey : e.ctrlKey;
+      const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0
+      const modifier = isMac ? e.metaKey : e.ctrlKey
 
       if (e.key === 'Escape') {
         if (pendingPostItColor || isAddingTextBox || showPostItMenu) {
@@ -611,10 +980,15 @@ function Note() {
         setPendingPostItColor(null)
         setIsAddingTextBox(false)
         setShowPostItMenu(false)
+        setTextToolbar(null)
+        setToolbarInlineFormats(INITIAL_TOOLBAR_INLINE_FORMATS)
       }
 
       // Delete/Backspace
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedItem && !isEditingTitle) {
+        if (document.activeElement?.hasAttribute?.('data-textbox-editor')) {
+          return
+        }
         e.preventDefault()
         if (selectedItem.type === 'textbox') {
           deleteTextBox(selectedItem.id)
@@ -651,6 +1025,58 @@ function Note() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [selectedItem, isEditingTitle, clipboard, pendingPostItColor, isAddingTextBox, showPostItMenu])
 
+  useEffect(() => {
+    const onSelectionChange = () => {
+      const el = document.activeElement
+      if (!el?.hasAttribute?.('data-textbox-editor')) {
+        setTextToolbar(null)
+        setToolbarInlineFormats(INITIAL_TOOLBAR_INLINE_FORMATS)
+        return
+      }
+      const id = el.getAttribute('data-textbox-id')
+      const rect = getNonCollapsedSelectionRectInEditor(el)
+      if (!rect) {
+        setTextToolbar(null)
+        setToolbarInlineFormats(INITIAL_TOOLBAR_INLINE_FORMATS)
+        return
+      }
+      setTextToolbar({
+        top: rect.bottom + 8,
+        left: rect.left + rect.width / 2,
+        textBoxId: id
+      })
+      setToolbarInlineFormats(readInlineFormatState())
+    }
+    document.addEventListener('selectionchange', onSelectionChange)
+    return () => document.removeEventListener('selectionchange', onSelectionChange)
+  }, [])
+
+  useEffect(() => {
+    const closeToolbar = (e) => {
+      if (e.target.closest?.('.note-text-format-toolbar')) return
+      if (e.target.closest?.('[data-textbox-editor]')) return
+      setTextToolbar(null)
+      setFormatPaletteOpen(null)
+      setToolbarInlineFormats(INITIAL_TOOLBAR_INLINE_FORMATS)
+    }
+    document.addEventListener('mousedown', closeToolbar)
+    return () => document.removeEventListener('mousedown', closeToolbar)
+  }, [])
+
+  useEffect(() => {
+    if (!textToolbar) setFormatPaletteOpen(null)
+  }, [textToolbar])
+
+  useEffect(() => {
+    if (formatPaletteOpen == null) return
+    const closePalette = (e) => {
+      if (e.target.closest?.('.note-text-format-palette')) return
+      if (e.target.closest?.('.note-text-format-palette-trigger')) return
+      setFormatPaletteOpen(null)
+    }
+    document.addEventListener('mousedown', closePalette, true)
+    return () => document.removeEventListener('mousedown', closePalette, true)
+  }, [formatPaletteOpen])
 
   const handleCanvasClick = (e) => {
     const onCanvasBg = e.target === canvasRef.current || e.target.classList.contains('note-content')
@@ -683,7 +1109,7 @@ function Note() {
       setTimeout(() => saveToHistory(), 50)
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
-          document.querySelector(`textarea[data-textbox-id="${newTextBoxId}"]`)?.focus()
+          document.querySelector(`[data-textbox-editor][data-textbox-id="${newTextBoxId}"]`)?.focus()
         })
       })
       return
@@ -2526,9 +2952,8 @@ function Note() {
                     stopAllDragging();
                     isRightClickRef.current = false;
                     
-                    // Don't drag if clicking on textarea - handle separately
-                    if (e.target.tagName === 'TEXTAREA') {
-                      // Single click - just select, don't drag yet
+                    // Don't drag if clicking on rich text editor - handle separately
+                    if (e.target.closest?.('[data-textbox-editor]')) {
                       handleSelectItem({ type: 'textbox', id: textBox.id });
                       return;
                     }
@@ -2617,17 +3042,20 @@ function Note() {
                     document.addEventListener('contextmenu', contextMenuHandler, { once: true });
                   }}
                   onDoubleClick={(e) => {
-                    // Double click on container - focus textarea for editing
-                    if (e.target.tagName !== 'TEXTAREA') {
-                      const textarea = e.currentTarget.querySelector('textarea');
-                      if (textarea) {
-                        textarea.focus();
-                        textarea.select();
+                    if (!e.target.closest?.('[data-textbox-editor]')) {
+                      const ed = e.currentTarget.querySelector('[data-textbox-editor]');
+                      if (ed) {
+                        ed.focus();
+                        const range = document.createRange();
+                        range.selectNodeContents(ed);
+                        const sel = window.getSelection();
+                        sel.removeAllRanges();
+                        sel.addRange(range);
                       }
                     }
                   }}
                   onTouchStart={(e) => {
-                    if (e.target.tagName === 'TEXTAREA' || e.target.closest('.react-resizable-handle')) return;
+                    if (e.target.closest?.('[data-textbox-editor]') || e.target.closest('.react-resizable-handle')) return;
                     
                     e.stopPropagation();
                     handleSelectItem({ type: 'textbox', id: textBox.id });
@@ -2673,135 +3101,24 @@ function Note() {
                   }}
                 >
                   <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-                    <textarea
-                      data-textbox-id={textBox.id}
-                      className={`note-textbox${isPostit ? ' note-textbox--postit' : ''}`}
-                      value={textBox.content}
-                      style={{
-                        width: '100%',
-                        height: '100%',
-                        ...(isPostit
-                          ? {
-                              backgroundColor: postitBg,
-                              color: postitFg,
-                              ['--postit-bg']: postitBg
-                            }
-                          : {})
-                      }}
-                      onChange={(e) => {
-                        setTextBoxes(textBoxes.map(tb => 
-                          tb.id === textBox.id ? { ...tb, content: e.target.value } : tb
-                        ));
-                        // Debounce history save for text changes (บันทึกหลังพิมพ์หยุด 500ms)
-                        if (textChangeTimeoutRef.current) {
-                          clearTimeout(textChangeTimeoutRef.current)
-                        }
-                        textChangeTimeoutRef.current = setTimeout(() => {
-                          saveToHistory()
-                        }, 500)
-                      }}
-                      onFocus={() => handleSelectItem({ type: 'textbox', id: textBox.id })}
-                      onBlur={() => {
-                        // บันทึก history ทันทีเมื่อ blur (เสร็จการแก้ไข)
-                        if (textChangeTimeoutRef.current) {
-                          clearTimeout(textChangeTimeoutRef.current)
-                          textChangeTimeoutRef.current = null
-                        }
-                        setTimeout(() => saveToHistory(), 50)
-                      }}
-                      onMouseDown={(e) => {
-                        // Check if right mouse button (button === 2)
-                        if (e.button === 2) {
-                          isRightClickRef.current = true;
-                          stopAllDragging();
-                          return;
-                        }
-                        
-                        // Single click - select the textbox
-                        handleSelectItem({ type: 'textbox', id: textBox.id });
-                        
-                        // Stop any previous dragging first
-                        stopAllDragging();
-                        isRightClickRef.current = false;
-                        
-                        // Don't prevent default immediately - allow text selection
-                        // But track if user wants to drag
-                        const startX = e.clientX;
-                        const startY = e.clientY;
-                        const startPosX = textBox.x;
-                        const startPosY = textBox.y;
-                        let hasMoved = false;
-                        let isDragging = false;
-
-                        const handleMouseMove = (moveEvent) => {
-                          // Don't drag if right click detected
-                          if (isRightClickRef.current || isContextMenuOpen) {
-                            stopAllDragging();
-                            return;
-                          }
-                          
-                          const deltaX = Math.abs(moveEvent.clientX - startX);
-                          const deltaY = Math.abs(moveEvent.clientY - startY);
-                          
-                          // Only start dragging if mouse moved more than 5px
-                          if ((deltaX > 5 || deltaY > 5) && !isDragging) {
-                            isDragging = true;
-                            hasMoved = true;
-                            setIsDragging(true);
-                            skipPersistDuringCanvasDragRef.current = true;
-                            // Blur textarea to stop text selection
-                            e.target.blur();
-                            // Prevent default to stop text selection
-                            moveEvent.preventDefault();
-                          }
-                          
-                          if (isDragging) {
-                            moveEvent.preventDefault();
-                            const finalDeltaX = moveEvent.clientX - startX;
-                            const finalDeltaY = moveEvent.clientY - startY;
-                            
-                            setTextBoxes(prevTextBoxes => prevTextBoxes.map(tb =>
-                              tb.id === textBox.id
-                                ? { ...tb, x: startPosX + finalDeltaX, y: startPosY + finalDeltaY }
-                                : tb
-                            ));
-                          }
-                        };
-
-                        const handleMouseUp = () => {
-                          setIsDragging(false);
-                          document.removeEventListener('mousemove', handleMouseMove);
-                          document.removeEventListener('mouseup', handleMouseUp);
-                          if (hasMoved && !isRightClickRef.current) {
-                            skipPersistDuringCanvasDragRef.current = false
-                            requestAnimationFrame(() => flushPersistFromSnapshot())
-                            setTimeout(() => saveToHistory(), 50)
-                          }
-                          isRightClickRef.current = false;
-                        };
-
-                        const contextMenuHandler = () => {
-                          isRightClickRef.current = true;
-                          stopAllDragging();
-                        };
-
-                        document.addEventListener('mousemove', handleMouseMove);
-                        document.addEventListener('mouseup', handleMouseUp);
-                        document.addEventListener('contextmenu', contextMenuHandler, { once: true });
-                      }}
-                      onContextMenu={(e) => {
-                        e.stopPropagation();
-                        isRightClickRef.current = true;
-                        stopAllDragging();
-                        handleContextMenu(e, { type: 'textbox', id: textBox.id });
-                      }}
-                      onDoubleClick={(e) => {
-                        // Double click - focus and select text for editing
-                        e.stopPropagation();
-                        e.target.focus();
-                        e.target.select();
-                      }}
-                      placeholder={isPostit ? 'Note' : 'Type here...'}
+                    <NoteTextEditor
+                      textBox={textBox}
+                      isPostit={isPostit}
+                      postitBg={postitBg}
+                      postitFg={postitFg}
+                      textChangeTimeoutRef={textChangeTimeoutRef}
+                      saveToHistory={saveToHistory}
+                      setTextBoxes={setTextBoxes}
+                      setTextToolbar={setTextToolbar}
+                      setToolbarInlineFormats={setToolbarInlineFormats}
+                      handleSelectItem={handleSelectItem}
+                      isContextMenuOpen={isContextMenuOpen}
+                      isRightClickRef={isRightClickRef}
+                      stopAllDragging={stopAllDragging}
+                      setIsDragging={setIsDragging}
+                      skipPersistDuringCanvasDragRef={skipPersistDuringCanvasDragRef}
+                      flushPersistFromSnapshot={flushPersistFromSnapshot}
+                      handleContextMenu={handleContextMenu}
                     />
                     {isSelected && (
                       <>
@@ -2854,6 +3171,156 @@ function Note() {
           })}
         </div>
       </div>
+
+      {textToolbar && (
+        <div
+          className="note-text-format-toolbar"
+          style={{
+            position: 'fixed',
+            top: textToolbar.top,
+            left: textToolbar.left,
+            transform: 'translateX(-50%)',
+            zIndex: 15000
+          }}
+          role="toolbar"
+          aria-label="Text formatting"
+          onMouseDown={(e) => e.preventDefault()}
+        >
+          <button
+            type="button"
+            className={`note-nav-btn${toolbarInlineFormats.bold ? ' active' : ''}`}
+            data-tooltip="Bold"
+            aria-label="Bold"
+            aria-pressed={toolbarInlineFormats.bold}
+            onClick={() => applyRichTextCommand(textToolbar.textBoxId, 'bold')}
+          >
+            <Bold size={15} />
+          </button>
+          <button
+            type="button"
+            className={`note-nav-btn${toolbarInlineFormats.italic ? ' active' : ''}`}
+            data-tooltip="Italic"
+            aria-label="Italic"
+            aria-pressed={toolbarInlineFormats.italic}
+            onClick={() => applyRichTextCommand(textToolbar.textBoxId, 'italic')}
+          >
+            <Italic size={15} />
+          </button>
+          <button
+            type="button"
+            className={`note-nav-btn${toolbarInlineFormats.strikeThrough ? ' active' : ''}`}
+            data-tooltip="Strikethrough"
+            aria-label="Strikethrough"
+            aria-pressed={toolbarInlineFormats.strikeThrough}
+            onClick={() => applyRichTextCommand(textToolbar.textBoxId, 'strikeThrough')}
+          >
+            <Strikethrough size={15} />
+          </button>
+          <span className="note-text-format-divider" aria-hidden />
+          <div className="note-text-format-picker">
+            <button
+              type="button"
+              className="note-nav-btn note-text-format-palette-trigger"
+              data-tooltip="Text color"
+              aria-label="Text color"
+              aria-expanded={formatPaletteOpen === 'fore'}
+              onClick={() =>
+                setFormatPaletteOpen((p) => (p === 'fore' ? null : 'fore'))
+              }
+            >
+              <span className="note-text-format-color-icon" aria-hidden>
+                A
+              </span>
+            </button>
+            {formatPaletteOpen === 'fore' && (
+              <div
+                className="note-text-format-palette"
+                onMouseDown={(e) => e.preventDefault()}
+              >
+                <div className="note-text-format-palette-grid">
+                  {TEXT_FORE_PALETTE.map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      className="note-text-format-swatch"
+                      style={{ backgroundColor: c }}
+                      title={c}
+                      aria-label={`Text color ${c}`}
+                      onClick={() => {
+                        applyRichTextCommand(textToolbar.textBoxId, 'foreColor', c)
+                        setFormatPaletteOpen(null)
+                      }}
+                    />
+                  ))}
+                </div>
+                <label className="note-text-format-palette-custom">
+                  Custom color…
+                  <input
+                    type="color"
+                    defaultValue="#3A3030"
+                    aria-label="Pick custom text color"
+                    onInput={(e) =>
+                      applyRichTextCommand(
+                        textToolbar.textBoxId,
+                        'foreColor',
+                        e.target.value
+                      )
+                    }
+                  />
+                </label>
+              </div>
+            )}
+          </div>
+          <div className="note-text-format-picker">
+            <button
+              type="button"
+              className="note-nav-btn note-text-format-palette-trigger"
+              data-tooltip="Highlight"
+              aria-label="Highlight"
+              aria-expanded={formatPaletteOpen === 'highlight'}
+              onClick={() =>
+                setFormatPaletteOpen((p) => (p === 'highlight' ? null : 'highlight'))
+              }
+            >
+              <Highlighter size={15} />
+            </button>
+            {formatPaletteOpen === 'highlight' && (
+              <div
+                className="note-text-format-palette"
+                onMouseDown={(e) => e.preventDefault()}
+              >
+                <div className="note-text-format-palette-grid">
+                  {TEXT_HIGHLIGHT_PALETTE.map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      className="note-text-format-swatch"
+                      style={{ backgroundColor: c }}
+                      title={c}
+                      aria-label={`Highlight ${c}`}
+                      onClick={() => {
+                        applyTextHighlight(textToolbar.textBoxId, c)
+                        setFormatPaletteOpen(null)
+                      }}
+                    />
+                  ))}
+                </div>
+                <label className="note-text-format-palette-custom">
+                  Custom color…
+                  <input
+                    type="color"
+                    defaultValue="#FFF59D"
+                    aria-label="Pick custom highlight color"
+                    onInput={(e) =>
+                      applyTextHighlight(textToolbar.textBoxId, e.target.value)
+                    }
+                  />
+                </label>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {rotationHud && (
         <div
