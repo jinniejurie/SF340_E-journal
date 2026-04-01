@@ -127,6 +127,14 @@ function normalizeEditorStorage(html) {
   return html
 }
 
+/** Viewport → coordinates inside `.note-content` (where absolute layers are positioned) */
+function clientPointToNoteContentCoords(canvasEl, clientX, clientY) {
+  if (!canvasEl) return { x: 0, y: 0 }
+  const content = canvasEl.querySelector('.note-content')
+  const r = (content ?? canvasEl).getBoundingClientRect()
+  return { x: clientX - r.left, y: clientY - r.top }
+}
+
 function getNonCollapsedSelectionRectInEditor(root) {
   const sel = window.getSelection()
   if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null
@@ -1082,9 +1090,11 @@ function Note() {
     const onCanvasBg = e.target === canvasRef.current || e.target.classList.contains('note-content')
 
     if (pendingPostItColor && canvasRef.current && onCanvasBg) {
-      const rect = canvasRef.current.getBoundingClientRect()
-      const x = e.clientX - rect.left
-      const y = e.clientY - rect.top
+      const { x, y } = clientPointToNoteContentCoords(
+        canvasRef.current,
+        e.clientX,
+        e.clientY
+      )
       const newTextBoxId = Date.now().toString()
       const newZIndex = maxZIndex + 1
       const entry = POSTIT_PALETTE.find((p) => p.color === pendingPostItColor) || POSTIT_PALETTE[0]
@@ -1124,9 +1134,11 @@ function Note() {
 
     if (!isAddingTextBox || !canvasRef.current) return
 
-    const rect = canvasRef.current.getBoundingClientRect()
-    const x = e.clientX - rect.left
-    const y = e.clientY - rect.top
+    const { x, y } = clientPointToNoteContentCoords(
+      canvasRef.current,
+      e.clientX,
+      e.clientY
+    )
 
     const newTextBoxId = Date.now().toString()
     const newZIndex = maxZIndex + 1
@@ -1154,9 +1166,9 @@ function Note() {
     
     // If click position provided, use it
     if (clickX !== null && clickY !== null && canvasRef.current) {
-      const rect = canvasRef.current.getBoundingClientRect();
-      x = clickX - rect.left;
-      y = clickY - rect.top;
+      const p = clientPointToNoteContentCoords(canvasRef.current, clickX, clickY)
+      x = p.x
+      y = p.y
     }
     
     const newZIndex = maxZIndex + 1;
@@ -1187,9 +1199,9 @@ function Note() {
     
     // If click position provided, use it
     if (clickX !== null && clickY !== null && canvasRef.current) {
-      const rect = canvasRef.current.getBoundingClientRect();
-      x = clickX - rect.left;
-      y = clickY - rect.top;
+      const p = clientPointToNoteContentCoords(canvasRef.current, clickX, clickY)
+      x = p.x
+      y = p.y
     }
     
     const newZIndex = maxZIndex + 1;
@@ -1299,7 +1311,8 @@ function Note() {
     stopAllDragging()
     const canvas = canvasRef.current
     if (!canvas) return
-    const cr = canvas.getBoundingClientRect()
+    const content = canvas.querySelector('.note-content') ?? canvas
+    const cr = content.getBoundingClientRect()
     const cx = cr.left + box.x + box.w / 2
     const cy = cr.top + box.y + box.h / 2
     const startRad = Math.atan2(e.clientY - cy, e.clientX - cx)
