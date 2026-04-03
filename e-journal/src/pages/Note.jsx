@@ -8,6 +8,7 @@ import {
   Download, 
   Share2, 
   ChevronLeft,
+  ChevronDown,
   Triangle,
   Star,
   Minus,
@@ -101,6 +102,37 @@ const TEXT_HIGHLIGHT_PALETTE = [
 
 const NOTE_STORAGE_KEY = (id) => `ejournal-note-${id ?? 'draft'}`
 
+/** Single source of truth for textbox body size; never read font-size from HTML */
+const DEFAULT_TEXTBOX_FONT_SIZE = 14
+const TEXTBOX_FONT_SIZE_MIN = 6
+const TEXTBOX_FONT_SIZE_MAX = 200
+const TEXTBOX_FONT_SIZE_PRESETS = [8, 10, 12, 14, 18, 24, 36, 48, 56, 64, 72, 80, 96, 104, 112, 120, 128]
+
+function clampTextBoxFontSize(n) {
+  const x = Number(n)
+  if (!Number.isFinite(x)) return DEFAULT_TEXTBOX_FONT_SIZE
+  return Math.min(TEXTBOX_FONT_SIZE_MAX, Math.max(TEXTBOX_FONT_SIZE_MIN, Math.round(x)))
+}
+
+/** Remove font-size from inline styles / FONT size so contentEditable uses wrapper fontSize only */
+function stripFontSizeFromHtml(html) {
+  if (html == null || html === '') return html
+  try {
+    const d = document.createElement('div')
+    d.innerHTML = html
+    d.querySelectorAll('*').forEach((el) => {
+      el.style.removeProperty('font-size')
+      el.style.removeProperty('fontSize')
+      if (el.tagName === 'FONT') el.removeAttribute('size')
+      const st = el.getAttribute('style')
+      if (st != null && st.trim() === '') el.removeAttribute('style')
+    })
+    return d.innerHTML
+  } catch {
+    return html
+  }
+}
+
 function escapeHtml(text) {
   if (text == null) return ''
   const d = document.createElement('div')
@@ -113,18 +145,19 @@ function contentToEditableHtml(raw) {
   if (raw == null || raw === '') return '<p><br></p>'
   const s = String(raw)
   const t = s.trim()
-  if (t && /<[a-z][\s\S]*>/i.test(t)) return s
-  return `<p>${escapeHtml(s).replace(/\n/g, '<br>')}</p>`
+  if (t && /<[a-z][\s\S]*>/i.test(t)) return stripFontSizeFromHtml(s)
+  return stripFontSizeFromHtml(`<p>${escapeHtml(s).replace(/\n/g, '<br>')}</p>`)
 }
 
 /** Persist empty editors as '' so undo/load stays consistent */
 function normalizeEditorStorage(html) {
   if (html == null || html === '' || html === '<br>') return ''
+  const cleaned = stripFontSizeFromHtml(html)
   const t = document.createElement('div')
-  t.innerHTML = html
+  t.innerHTML = cleaned
   const text = t.textContent?.replace(/\u200b/g, '').trim() ?? ''
   if (!text) return ''
-  return html
+  return cleaned
 }
 
 /** Viewport → coordinates inside `.note-content` (where absolute layers are positioned) */
@@ -163,6 +196,177 @@ function readInlineFormatState() {
   } catch {
     return { ...INITIAL_TOOLBAR_INLINE_FORMATS }
   }
+}
+
+/** Flip to true in dev to see which handler closes the floating text toolbar */
+const DEBUG_NOTE_TEXT_TOOLBAR = false
+function logNoteToolbarDebug(...args) {
+  if (DEBUG_NOTE_TEXT_TOOLBAR) console.log('[NoteToolbar]', ...args)
+}
+
+/** Whitelist for “inside rich text UI” — use for document mousedown + selectionchange */
+function isInsideRichTextToolbarWhitelist(node) {
+  if (!node || typeof node.closest !== 'function') return false
+  return !!(
+    node.closest('[data-textbox-editor]') ||
+    node.closest('.note-text-format-toolbar') ||
+    node.closest('.note-font-size-canva')
+  )
+}
+
+/** Canva-style: one numeric field + chevron dropdown presets */
+function NoteFontSizeCanvaControl({ committedSize, onApply }) {
+  const [draft, setDraft] = useState(() =>
+    String(Math.round(clampTextBoxFontSize(committedSize ?? DEFAULT_TEXTBOX_FONT_SIZE)))
+  )
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef(null)
+  const inputRef = useRef(null)
+  const inputFocusedRef = useRef(false)
+
+  useEffect(() => {
+    if (inputFocusedRef.current) return
+    setDraft(
+      String(Math.round(clampTextBoxFontSize(committedSize ?? DEFAULT_TEXTBOX_FONT_SIZE)))
+    )
+  }, [committedSize])
+
+  useEffect(() => {
+    if (!open) return
+    const onDocDown = (e) => {
+      if (rootRef.current?.contains(e.target)) return
+      setOpen(false)
+    }
+    document.addEventListener('mousedown', onDocDown, true)
+    return () => document.removeEventListener('mousedown', onDocDown, true)
+  }, [open])
+
+  const applyDraft = () => {
+    const n = parseInt(String(draft).replace(/\D/g, ''), 10)
+    if (!Number.isFinite(n)) {
+      setDraft(
+        String(Math.round(clampTextBoxFontSize(committedSize ?? DEFAULT_TEXTBOX_FONT_SIZE)))
+      )
+      return
+    }
+    const c = clampTextBoxFontSize(n)
+    onApply(c)
+    setDraft(String(c))
+  }
+
+  const currentApplied = Math.round(
+    clampTextBoxFontSize(committedSize ?? DEFAULT_TEXTBOX_FONT_SIZE)
+  )
+
+  return (
+    <div
+      ref={rootRef}
+      className="note-font-size-canva"
+    >
+      <div className="note-font-size-canva-row">
+        <input
+          ref={inputRef}
+          type="text"
+          inputMode="numeric"
+          className="note-font-size-canva-input"
+          aria-label="Font size in pixels"
+          value={draft}
+          onFocus={(e) => {
+            inputFocusedRef.current = true
+            e.target.select()
+            setOpen(true)
+          }}
+          onClick={(e) => {
+            e.stopPropagation()
+            inputRef.current?.focus()
+            e.currentTarget.select()
+            setOpen(true)
+          }}
+          onChange={(e) => {
+            let v = e.target.value.replace(/\D/g, '')
+            if (v === '') {
+              setDraft('')
+              return
+            }
+            const n = parseInt(v, 10)
+            if (!Number.isFinite(n)) {
+              setDraft('')
+              return
+            }
+            if (n > TEXTBOX_FONT_SIZE_MAX) setDraft(String(TEXTBOX_FONT_SIZE_MAX))
+            else setDraft(v)
+          }}
+          onBlur={() => {
+            inputFocusedRef.current = false
+            applyDraft()
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              const n = parseInt(String(draft).replace(/\D/g, ''), 10)
+              if (Number.isFinite(n)) {
+                const c = clampTextBoxFontSize(n)
+                onApply(c)
+                setDraft(String(c))
+              } else {
+                setDraft(String(currentApplied))
+              }
+              requestAnimationFrame(() => {
+                inputRef.current?.focus()
+                inputRef.current?.select()
+              })
+            }
+          }}
+        />
+        <button
+          type="button"
+          className="note-font-size-canva-chevron"
+          aria-expanded={open}
+          aria-haspopup="listbox"
+          aria-label="Font size presets"
+          onMouseDown={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+          }}
+          onClick={() => {
+            setOpen((o) => !o)
+            requestAnimationFrame(() => {
+              inputRef.current?.focus()
+              inputRef.current?.select()
+            })
+          }}
+        >
+          <ChevronDown size={14} strokeWidth={2} />
+        </button>
+      </div>
+      {open && (
+        <ul className="note-font-size-canva-dropdown" role="listbox">
+          {TEXTBOX_FONT_SIZE_PRESETS.map((pz) => (
+            <li key={pz} role="none">
+              <button
+                type="button"
+                role="option"
+                aria-selected={currentApplied === pz}
+                className={`note-font-size-canva-option${currentApplied === pz ? ' is-current' : ''}`}
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                }}
+                onClick={() => {
+                  onApply(pz)
+                  setDraft(String(pz))
+                  setOpen(false)
+                  requestAnimationFrame(() => inputRef.current?.focus())
+                }}
+              >
+                {pz}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
 }
 
 function NoteTextEditor({
@@ -233,6 +437,7 @@ function NoteTextEditor({
       style={{
         width: '100%',
         height: '100%',
+        fontSize: `${clampTextBoxFontSize(textBox.fontSize ?? DEFAULT_TEXTBOX_FONT_SIZE)}px`,
         ...(isPostit
           ? {
               backgroundColor: postitBg,
@@ -262,19 +467,28 @@ function NoteTextEditor({
         }
       }}
       onFocus={() => handleSelectItem({ type: 'textbox', id: textBox.id })}
-      onBlur={() => {
+      onBlur={(e) => {
         if (textChangeTimeoutRef.current) {
           clearTimeout(textChangeTimeoutRef.current)
           textChangeTimeoutRef.current = null
         }
-        setTimeout(() => saveToHistory(), 50)
-        setTimeout(() => {
-          const a = document.activeElement
-          if (!a?.hasAttribute?.('data-textbox-editor') && !a?.closest?.('.note-text-format-toolbar')) {
-            setTextToolbar(null)
-            setToolbarInlineFormats(INITIAL_TOOLBAR_INLINE_FORMATS)
-          }
-        }, 0)
+        // IMPORTANT: keep blur timing synchronous.
+        // If focus is moving into our UI controls, do NOT close the toolbar.
+        // Otherwise, let the global outside-click handler close it.
+        const target = e?.relatedTarget ?? null
+        if (!target) return
+
+        const isInAllowedUI =
+          !!target?.closest?.('.note-text-format-toolbar') ||
+          !!target?.closest?.('.note-font-size-canva')
+
+        if (
+          !target?.hasAttribute?.('data-textbox-editor') &&
+          !isInAllowedUI
+        ) {
+          setTextToolbar(null)
+          setToolbarInlineFormats(INITIAL_TOOLBAR_INLINE_FORMATS)
+        }
       }}
       onMouseUp={(e) => {
         const el = e.currentTarget
@@ -493,6 +707,34 @@ function Note() {
   const [textToolbar, setTextToolbar] = useState(null)
   const [formatPaletteOpen, setFormatPaletteOpen] = useState(null)
   const [toolbarInlineFormats, setToolbarInlineFormats] = useState(INITIAL_TOOLBAR_INLINE_FORMATS)
+  /** Blocks toolbar close while user is in pointer interaction with toolbar / font-size UI */
+  const isInteractingWithToolbarRef = useRef(false)
+
+  useEffect(() => {
+    let clearRaf = 0
+    const onPointerDownCapture = (e) => {
+      if (isInsideRichTextToolbarWhitelist(e.target)) {
+        isInteractingWithToolbarRef.current = true
+        logNoteToolbarDebug('pointerdown capture: whitelist', e.target)
+      }
+    }
+    const onPointerUpCapture = () => {
+      cancelAnimationFrame(clearRaf)
+      clearRaf = requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          isInteractingWithToolbarRef.current = false
+          logNoteToolbarDebug('interaction flag cleared (after rAF)')
+        })
+      })
+    }
+    document.addEventListener('pointerdown', onPointerDownCapture, true)
+    document.addEventListener('pointerup', onPointerUpCapture, true)
+    return () => {
+      cancelAnimationFrame(clearRaf)
+      document.removeEventListener('pointerdown', onPointerDownCapture, true)
+      document.removeEventListener('pointerup', onPointerUpCapture, true)
+    }
+  }, [])
 
   // Close menus when selecting different item type
   const handleSelectItem = (item) => {
@@ -534,6 +776,8 @@ function Note() {
   const stickerDragCleanupRef = useRef(null)
   const activeRotationDragRef = useRef(null)
   const skipPersistDuringCanvasDragRef = useRef(false)
+  /** { id, startW, startH, startFs } — scale fontSize during corner resize */
+  const textBoxResizeSessionRef = useRef(null)
   const persistSnapshotRef = useRef(null)
   const FIRESTORE_DEBOUNCE_MS = 2000
 
@@ -797,6 +1041,22 @@ function Note() {
     [saveToHistory]
   )
 
+  const updateTextBoxFontSize = useCallback(
+    (textBoxId, value) => {
+      const n =
+        typeof value === 'number'
+          ? value
+          : parseInt(String(value).replace(/\D/g, ''), 10)
+      if (!Number.isFinite(n)) return
+      const fs = clampTextBoxFontSize(n)
+      setTextBoxes((prev) =>
+        prev.map((tb) => (tb.id === textBoxId ? { ...tb, fontSize: fs } : tb))
+      )
+      setTimeout(() => saveToHistory(), 50)
+    },
+    [saveToHistory]
+  )
+
   const handleUndo = () => {
     if (historyIndex > 0) {
       isRestoringRef.current = true
@@ -1035,8 +1295,17 @@ function Note() {
 
   useEffect(() => {
     const onSelectionChange = () => {
+      if (isInteractingWithToolbarRef.current) {
+        logNoteToolbarDebug('selectionchange: skip (isInteractingWithToolbarRef)')
+        return
+      }
       const el = document.activeElement
+      if (isInsideRichTextToolbarWhitelist(el)) {
+        logNoteToolbarDebug('selectionchange: skip (whitelist activeElement)', el)
+        return
+      }
       if (!el?.hasAttribute?.('data-textbox-editor')) {
+        logNoteToolbarDebug('selectionchange: close (not editor)', el)
         setTextToolbar(null)
         setToolbarInlineFormats(INITIAL_TOOLBAR_INLINE_FORMATS)
         return
@@ -1044,6 +1313,7 @@ function Note() {
       const id = el.getAttribute('data-textbox-id')
       const rect = getNonCollapsedSelectionRectInEditor(el)
       if (!rect) {
+        logNoteToolbarDebug('selectionchange: close (no rect)')
         setTextToolbar(null)
         setToolbarInlineFormats(INITIAL_TOOLBAR_INLINE_FORMATS)
         return
@@ -1061,8 +1331,16 @@ function Note() {
 
   useEffect(() => {
     const closeToolbar = (e) => {
-      if (e.target.closest?.('.note-text-format-toolbar')) return
-      if (e.target.closest?.('[data-textbox-editor]')) return
+      const t = e.target
+      if (isInteractingWithToolbarRef.current) {
+        logNoteToolbarDebug('mousedown closeToolbar: skip (isInteractingWithToolbarRef)')
+        return
+      }
+      if (isInsideRichTextToolbarWhitelist(t)) {
+        logNoteToolbarDebug('mousedown closeToolbar: skip (whitelist)', t)
+        return
+      }
+      logNoteToolbarDebug('mousedown closeToolbar: set null', t)
       setTextToolbar(null)
       setFormatPaletteOpen(null)
       setToolbarInlineFormats(INITIAL_TOOLBAR_INLINE_FORMATS)
@@ -1107,6 +1385,7 @@ function Note() {
         height: 176,
         rotation: 0,
         zIndex: newZIndex,
+        fontSize: DEFAULT_TEXTBOX_FONT_SIZE,
         variant: 'postit',
         postitColor: pendingPostItColor,
         postitTextColor: entry.textColor || '#2d2a26'
@@ -1150,7 +1429,8 @@ function Note() {
       width: 200,
       height: 100,
       rotation: 0,
-      zIndex: newZIndex
+      zIndex: newZIndex,
+      fontSize: DEFAULT_TEXTBOX_FONT_SIZE
     }
 
     setMaxZIndex(newZIndex)
@@ -2896,18 +3176,42 @@ function Note() {
               return (
               <Resizable
                 key={textBox.id}
+                minWidth={48}
+                minHeight={32}
                 size={{ width: textBox.width, height: textBox.height }}
                 onResizeStart={() => {
-                  setIsResizing(true);
-                  setIsDragging(false);
+                  textBoxResizeSessionRef.current = {
+                    id: textBox.id,
+                    startW: textBox.width,
+                    startH: textBox.height,
+                    startFs: clampTextBoxFontSize(
+                      textBox.fontSize ?? DEFAULT_TEXTBOX_FONT_SIZE
+                    )
+                  }
+                  setIsResizing(true)
+                  setIsDragging(false)
+                  skipPersistDuringCanvasDragRef.current = true
                 }}
-                onResizeStop={(e, direction, ref, d) => {
-                  setTextBoxes(prevTextBoxes => prevTextBoxes.map(tb =>
-                    tb.id === textBox.id
-                      ? { ...tb, width: tb.width + d.width, height: tb.height + d.height }
-                      : tb
-                  ));
-                  setIsResizing(false);
+                onResize={(e, direction, ref, d) => {
+                  const s = textBoxResizeSessionRef.current
+                  if (!s || s.id !== textBox.id) return
+                  const nw = Math.max(48, s.startW + d.width)
+                  const nh = Math.max(32, s.startH + d.height)
+                  const scale = (nw / s.startW + nh / s.startH) / 2
+                  const nfs = clampTextBoxFontSize(Math.round(s.startFs * scale))
+                  setTextBoxes((prevTextBoxes) =>
+                    prevTextBoxes.map((tb) =>
+                      tb.id === textBox.id
+                        ? { ...tb, width: nw, height: nh, fontSize: nfs }
+                        : tb
+                    )
+                  )
+                }}
+                onResizeStop={() => {
+                  textBoxResizeSessionRef.current = null
+                  setIsResizing(false)
+                  skipPersistDuringCanvasDragRef.current = false
+                  requestAnimationFrame(() => flushPersistFromSnapshot())
                   setTimeout(() => saveToHistory(), 50)
                 }}
                 className={`note-textbox-wrapper ${isSelected ? 'selected' : ''}${isPostit ? ' note-textbox-wrapper--postit' : ''}`}
@@ -2920,20 +3224,16 @@ function Note() {
                   transformOrigin: 'center center'
                 }}
                 enable={{
-                  top: true,
-                  right: true,
-                  bottom: true,
-                  left: true,
+                  top: false,
+                  right: false,
+                  bottom: false,
+                  left: false,
                   topRight: true,
                   bottomRight: true,
                   bottomLeft: true,
                   topLeft: true
                 }}
                 handleStyles={{
-                  top: { cursor: 'n-resize' },
-                  right: { cursor: 'e-resize' },
-                  bottom: { cursor: 's-resize' },
-                  left: { cursor: 'w-resize' },
                   topRight: { cursor: 'ne-resize' },
                   bottomRight: { cursor: 'se-resize' },
                   bottomLeft: { cursor: 'sw-resize' },
@@ -3197,7 +3497,14 @@ function Note() {
           }}
           role="toolbar"
           aria-label="Text formatting"
-          onMouseDown={(e) => e.preventDefault()}
+          onMouseDown={(e) => {
+            const t = e.target
+            // อย่า preventDefault บน input / font-size UI — จะทำให้โฟกัสหายและ toolbar ปิด
+            if (t?.closest?.('.note-font-size-canva')) return
+            if (t?.tagName === 'INPUT' || t?.tagName === 'TEXTAREA' || t?.tagName === 'SELECT')
+              return
+            e.preventDefault()
+          }}
         >
           <button
             type="button"
@@ -3229,6 +3536,15 @@ function Note() {
           >
             <Strikethrough size={15} />
           </button>
+          <span className="note-text-format-divider" aria-hidden />
+          <NoteFontSizeCanvaControl
+            key={`tb-fs-${textToolbar.textBoxId}`}
+            committedSize={
+              textBoxes.find((t) => t.id === textToolbar.textBoxId)?.fontSize ??
+              DEFAULT_TEXTBOX_FONT_SIZE
+            }
+            onApply={(n) => updateTextBoxFontSize(textToolbar.textBoxId, n)}
+          />
           <span className="note-text-format-divider" aria-hidden />
           <div className="note-text-format-picker">
             <button

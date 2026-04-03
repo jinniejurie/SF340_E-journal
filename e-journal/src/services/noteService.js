@@ -4,6 +4,7 @@ import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore'
 /**
  * Firestore path: USER / {uid} / NOTES / {noteId}
  * Document: { dateKey, title, tagName, tagColor, textBoxes, shapes, images, stickers, maxZIndex, updatedAt }
+ * textBoxes[] may include fontSize (number px); inline HTML must not carry font-size (stripped on save).
  */
 
 export async function getNoteFromFirestore(noteId) {
