@@ -669,6 +669,7 @@
   word-wrap: break-word;
   overflow-wrap: break-word;
   white-space: pre-wrap;
+  caret-color: #000;
 }
 
 /* fontSize lives on the textbox model + inline style on this root; ignore nested font-size */
@@ -680,6 +681,16 @@
 .note-textbox-editor p {
   margin: 0;
   min-height: 1.35em;
+}
+
+/* Selected but not yet in text-edit mode: no caret, no text drag-selection */
+.note-textbox-editor--move-mode {
+  cursor: default;
+  user-select: none;
+}
+
+.note-textbox-editor--move-mode * {
+  user-select: none;
 }
 
 .note-textbox-editor--empty::before {

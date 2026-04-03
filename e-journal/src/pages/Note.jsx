@@ -214,6 +214,71 @@ function isInsideRichTextToolbarWhitelist(node) {
   )
 }
 
+/** focus() alone often leaves no blinking caret until a later click; use the activating click coords when possible */
+function placeCaretInContentEditable(el, clientX, clientY) {
+  if (!el) return
+  el.focus({ preventScroll: true })
+
+  const collapseToEnd = () => {
+    try {
+      const sel = window.getSelection()
+      const range = document.createRange()
+      range.selectNodeContents(el)
+      range.collapse(false)
+      sel.removeAllRanges()
+      sel.addRange(range)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const hasPointer =
+    typeof clientX === 'number' &&
+    typeof clientY === 'number' &&
+    !Number.isNaN(clientX) &&
+    !Number.isNaN(clientY)
+
+  let placed = false
+  if (hasPointer && typeof document.caretRangeFromPoint === 'function') {
+    try {
+      const r = document.caretRangeFromPoint(clientX, clientY)
+      if (r && el.contains(r.startContainer)) {
+        const sel = window.getSelection()
+        sel.removeAllRanges()
+        sel.addRange(r)
+        placed = true
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  if (!placed && hasPointer && typeof document.caretPositionFromPoint === 'function') {
+    try {
+      const pos = document.caretPositionFromPoint(clientX, clientY)
+      if (pos?.offsetNode && el.contains(pos.offsetNode)) {
+        const range = document.createRange()
+        const { offsetNode, offset } = pos
+        if (offsetNode.nodeType === Node.TEXT_NODE) {
+          const len = offsetNode.textContent?.length ?? 0
+          range.setStart(offsetNode, Math.min(Math.max(0, offset), len))
+        } else {
+          range.setStartBefore(el)
+        }
+        range.collapse(true)
+        const sel = window.getSelection()
+        sel.removeAllRanges()
+        sel.addRange(range)
+        placed = true
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  if (!placed) {
+    collapseToEnd()
+  }
+}
+
 /** Canva-style: one numeric field + chevron dropdown presets */
 function NoteFontSizeCanvaControl({ committedSize, onApply }) {
   const [draft, setDraft] = useState(() =>
@@ -380,6 +445,11 @@ function NoteTextEditor({
   setTextToolbar,
   setToolbarInlineFormats,
   handleSelectItem,
+  isSelected,
+  isEditing,
+  textBoxSelectionSyncRef,
+  beginTextBoxEditing,
+  endTextBoxEditing,
   isContextMenuOpen,
   isRightClickRef,
   stopAllDragging,
@@ -390,6 +460,8 @@ function NoteTextEditor({
 }) {
   const elRef = useRef(null)
   const lastCommittedHtml = useRef(null)
+  /** True only after beginTextBoxEditing() from 2nd click — avoid wiping drag-selection on every click */
+  const pendingPointerCaretRef = useRef(false)
 
   useLayoutEffect(() => {
     lastCommittedHtml.current = null
@@ -411,6 +483,35 @@ function NoteTextEditor({
     }
   }, [textBox.content, textBox.id])
 
+  useLayoutEffect(() => {
+    if (!isEditing) return
+    const el = elRef.current
+    if (!el) return
+    let innerRaf = 0
+    const outerRaf = requestAnimationFrame(() => {
+      innerRaf = requestAnimationFrame(() => {
+        const node = elRef.current
+        if (!node?.isContentEditable) return
+        if (document.activeElement !== node) {
+          node.focus({ preventScroll: true })
+        }
+        const sel = window.getSelection()
+        const anchorOk = sel.anchorNode && node.contains(sel.anchorNode)
+        if (!anchorOk) {
+          placeCaretInContentEditable(node)
+        }
+      })
+    })
+    return () => {
+      cancelAnimationFrame(outerRaf)
+      cancelAnimationFrame(innerRaf)
+    }
+  }, [isEditing, textBox.id])
+
+  useLayoutEffect(() => {
+    if (!isEditing) pendingPointerCaretRef.current = false
+  }, [isEditing])
+
   const pushHtml = (html) => {
     const stored = normalizeEditorStorage(html)
     lastCommittedHtml.current = stored
@@ -427,12 +528,12 @@ function NoteTextEditor({
     <div
       ref={elRef}
       role="textbox"
-      tabIndex={0}
-      contentEditable
+      tabIndex={isEditing ? 0 : -1}
+      contentEditable={isEditing}
       suppressContentEditableWarning
       data-textbox-editor
       data-textbox-id={textBox.id}
-      className={`note-textbox note-textbox-editor${isPostit ? ' note-textbox--postit' : ''}`}
+      className={`note-textbox note-textbox-editor${isPostit ? ' note-textbox--postit' : ''}${isEditing ? '' : ' note-textbox-editor--move-mode'}`}
       data-placeholder={isPostit ? 'Note' : 'Type here...'}
       style={{
         width: '100%',
@@ -466,24 +567,30 @@ function NoteTextEditor({
           setToolbarInlineFormats(INITIAL_TOOLBAR_INLINE_FORMATS)
         }
       }}
-      onFocus={() => handleSelectItem({ type: 'textbox', id: textBox.id })}
+      onFocus={() => {
+        if (isEditing) {
+          handleSelectItem({ type: 'textbox', id: textBox.id })
+        }
+      }}
       onBlur={(e) => {
         if (textChangeTimeoutRef.current) {
           clearTimeout(textChangeTimeoutRef.current)
           textChangeTimeoutRef.current = null
         }
-        // IMPORTANT: keep blur timing synchronous.
-        // If focus is moving into our UI controls, do NOT close the toolbar.
-        // Otherwise, let the global outside-click handler close it.
-        const target = e?.relatedTarget ?? null
-        if (!target) return
+        const rt = e?.relatedTarget ?? null
+
+        if (isEditing && !isInsideRichTextToolbarWhitelist(rt)) {
+          endTextBoxEditing()
+        }
+
+        if (!rt) return
 
         const isInAllowedUI =
-          !!target?.closest?.('.note-text-format-toolbar') ||
-          !!target?.closest?.('.note-font-size-canva')
+          !!rt?.closest?.('.note-text-format-toolbar') ||
+          !!rt?.closest?.('.note-font-size-canva')
 
         if (
-          !target?.hasAttribute?.('data-textbox-editor') &&
+          !rt?.hasAttribute?.('data-textbox-editor') &&
           !isInAllowedUI
         ) {
           setTextToolbar(null)
@@ -517,12 +624,33 @@ function NoteTextEditor({
           setToolbarInlineFormats(INITIAL_TOOLBAR_INLINE_FORMATS)
         }
       }}
+      onClick={(e) => {
+        e.stopPropagation()
+        handleSelectItem({ type: 'textbox', id: textBox.id })
+        if (!isEditing || !pendingPointerCaretRef.current) return
+        pendingPointerCaretRef.current = false
+        const x = e.clientX
+        const y = e.clientY
+        requestAnimationFrame(() => {
+          const el = elRef.current
+          if (!el?.isContentEditable) return
+          placeCaretInContentEditable(el, x, y)
+        })
+      }}
       onMouseDown={(e) => {
         if (e.button === 2) {
           isRightClickRef.current = true
           stopAllDragging()
           return
         }
+        e.stopPropagation()
+        if (isEditing) {
+          stopAllDragging()
+          isRightClickRef.current = false
+          return
+        }
+        // Sync ref updates in handleSelectItem before re-render; isSelected alone can lag one click behind.
+        const wasAlreadySelected = textBoxSelectionSyncRef.current === textBox.id
         handleSelectItem({ type: 'textbox', id: textBox.id })
         stopAllDragging()
         isRightClickRef.current = false
@@ -545,7 +673,6 @@ function NoteTextEditor({
             hasMoved = true
             setIsDragging(true)
             skipPersistDuringCanvasDragRef.current = true
-            elRef.current?.blur()
             moveEvent.preventDefault()
           }
           if (dragging) {
@@ -570,6 +697,9 @@ function NoteTextEditor({
             skipPersistDuringCanvasDragRef.current = false
             requestAnimationFrame(() => flushPersistFromSnapshot())
             setTimeout(() => saveToHistory(), 50)
+          } else if (!hasMoved && wasAlreadySelected && !isRightClickRef.current) {
+            pendingPointerCaretRef.current = true
+            beginTextBoxEditing()
           }
           isRightClickRef.current = false
         }
@@ -591,7 +721,18 @@ function NoteTextEditor({
       }}
       onDoubleClick={(e) => {
         e.stopPropagation()
-        e.currentTarget.focus()
+        if (!isEditing) {
+          handleSelectItem({ type: 'textbox', id: textBox.id }, { startEditing: true })
+        }
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape' && isEditing) {
+          e.stopPropagation()
+          setTextToolbar(null)
+          setToolbarInlineFormats(INITIAL_TOOLBAR_INLINE_FORMATS)
+          endTextBoxEditing()
+          elRef.current?.blur()
+        }
       }}
     />
   )
@@ -695,6 +836,9 @@ function Note() {
   const [isAddingTextBox, setIsAddingTextBox] = useState(false)
   const [loading, setLoading] = useState(false)
   const [selectedItem, setSelectedItem] = useState(null)
+  const [editingTextBoxId, setEditingTextBoxId] = useState(null)
+  /** Mirrors selected textbox id synchronously in handleSelectItem (state lags one paint). */
+  const textBoxSelectionSyncRef = useRef(null)
   const saveEnabledRef = useRef(false)
   const firestoreSaveTimeoutRef = useRef(null)
   const [showColorPicker, setShowColorPicker] = useState(false)
@@ -736,9 +880,22 @@ function Note() {
     }
   }, [])
 
+  const endTextBoxEditing = useCallback(() => {
+    setEditingTextBoxId(null)
+  }, [])
+
   // Close menus when selecting different item type
-  const handleSelectItem = (item) => {
-    setSelectedItem(item);
+  const handleSelectItem = (item, options = {}) => {
+    textBoxSelectionSyncRef.current = item?.type === 'textbox' ? item.id : null
+    setSelectedItem(item)
+    if (options.startEditing && item?.type === 'textbox') {
+      setEditingTextBoxId(item.id)
+    } else {
+      setEditingTextBoxId((prev) => {
+        if (item?.type === 'textbox' && item.id === prev) return prev
+        return null
+      })
+    }
     // Close all menus when selecting an item
     if (item) {
       // Only show color picker if selecting a shape
@@ -761,7 +918,7 @@ function Note() {
       setShowStickersMenu(false);
       setShowPostItMenu(false);
     }
-  };
+  }
   const [isDragging, setIsDragging] = useState(false)
   const [isResizing, setIsResizing] = useState(false)
   const [rotationHud, setRotationHud] = useState(null)
@@ -1226,6 +1383,10 @@ function Note() {
         if (inRichText && e.key === 'Escape') {
           setTextToolbar(null)
           setToolbarInlineFormats(INITIAL_TOOLBAR_INLINE_FORMATS)
+          setEditingTextBoxId(null)
+          if (document.activeElement?.hasAttribute?.('data-textbox-editor')) {
+            document.activeElement.blur()
+          }
         }
         if (e.target.tagName === 'TEXTAREA' || inRichText) {
           const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0
@@ -1392,15 +1553,10 @@ function Note() {
       }
       setMaxZIndex(newZIndex)
       setTextBoxes((prev) => [...prev, newTextBox])
-      handleSelectItem({ type: 'textbox', id: newTextBoxId })
+      handleSelectItem({ type: 'textbox', id: newTextBoxId }, { startEditing: true })
       setPendingPostItColor(null)
       setShowPostItMenu(false)
       setTimeout(() => saveToHistory(), 50)
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          document.querySelector(`[data-textbox-editor][data-textbox-id="${newTextBoxId}"]`)?.focus()
-        })
-      })
       return
     }
 
@@ -1435,7 +1591,7 @@ function Note() {
 
     setMaxZIndex(newZIndex)
     setTextBoxes([...textBoxes, newTextBox])
-    handleSelectItem({ type: 'textbox', id: newTextBoxId })
+    handleSelectItem({ type: 'textbox', id: newTextBoxId }, { startEditing: true })
     setIsAddingTextBox(false)
     setTimeout(() => saveToHistory(), 50)
   }
@@ -1531,24 +1687,29 @@ function Note() {
 
   const deleteTextBox = (id) => {
     setTextBoxes(textBoxes.filter(tb => tb.id !== id));
+    textBoxSelectionSyncRef.current = null
     setSelectedItem(null);
+    setEditingTextBoxId((prev) => (prev === id ? null : prev))
     setTimeout(() => saveToHistory(), 50)
   };
 
   const deleteShape = (id) => {
     setShapes(shapes.filter(s => s.id !== id));
+    textBoxSelectionSyncRef.current = null
     setSelectedItem(null);
     setTimeout(() => saveToHistory(), 50)
   };
 
   const deleteSticker = (id) => {
     setStickers(stickers.filter(s => s.id !== id));
+    textBoxSelectionSyncRef.current = null
     setSelectedItem(null);
     setTimeout(() => saveToHistory(), 50)
   };
 
   const deleteImage = (id) => {
     setImages(images.filter(i => i.id !== id));
+    textBoxSelectionSyncRef.current = null
     setSelectedItem(null);
     setTimeout(() => saveToHistory(), 50)
   };
@@ -2131,6 +2292,7 @@ function Note() {
           onTouchStart={(e) => {
             if (e.target.closest('.react-resizable-handle')) return;
             e.stopPropagation();
+            textBoxSelectionSyncRef.current = null
             setSelectedItem({ type: 'shape', id: shape.id });
             setIsDragging(true);
             
@@ -3170,6 +3332,7 @@ function Note() {
               // textbox
               const textBox = element;
               const isSelected = selectedItem?.type === 'textbox' && selectedItem.id === textBox.id;
+              const isTextBoxEditing = editingTextBoxId === textBox.id
               const isPostit = textBox.variant === 'postit'
               const postitBg = textBox.postitColor || '#FEEF9F'
               const postitFg = textBox.postitTextColor || '#2d2a26'
@@ -3264,6 +3427,13 @@ function Note() {
                     // Stop any previous dragging first
                     stopAllDragging();
                     isRightClickRef.current = false;
+
+                    if (isTextBoxEditing) {
+                      if (e.target.closest?.('[data-textbox-editor]')) {
+                        handleSelectItem({ type: 'textbox', id: textBox.id });
+                      }
+                      return;
+                    }
                     
                     // Don't drag if clicking on rich text editor - handle separately
                     if (e.target.closest?.('[data-textbox-editor]')) {
@@ -3356,15 +3526,21 @@ function Note() {
                   }}
                   onDoubleClick={(e) => {
                     if (!e.target.closest?.('[data-textbox-editor]')) {
-                      const ed = e.currentTarget.querySelector('[data-textbox-editor]');
-                      if (ed) {
-                        ed.focus();
-                        const range = document.createRange();
-                        range.selectNodeContents(ed);
-                        const sel = window.getSelection();
-                        sel.removeAllRanges();
-                        sel.addRange(range);
-                      }
+                      e.stopPropagation();
+                      handleSelectItem({ type: 'textbox', id: textBox.id }, { startEditing: true });
+                      requestAnimationFrame(() => {
+                        requestAnimationFrame(() => {
+                          const ed = e.currentTarget.querySelector('[data-textbox-editor]');
+                          if (ed) {
+                            ed.focus();
+                            const range = document.createRange();
+                            range.selectNodeContents(ed);
+                            const sel = window.getSelection();
+                            sel.removeAllRanges();
+                            sel.addRange(range);
+                          }
+                        });
+                      });
                     }
                   }}
                   onTouchStart={(e) => {
@@ -3425,6 +3601,11 @@ function Note() {
                       setTextToolbar={setTextToolbar}
                       setToolbarInlineFormats={setToolbarInlineFormats}
                       handleSelectItem={handleSelectItem}
+                      isSelected={isSelected}
+                      isEditing={isTextBoxEditing}
+                      textBoxSelectionSyncRef={textBoxSelectionSyncRef}
+                      beginTextBoxEditing={() => setEditingTextBoxId(textBox.id)}
+                      endTextBoxEditing={endTextBoxEditing}
                       isContextMenuOpen={isContextMenuOpen}
                       isRightClickRef={isRightClickRef}
                       stopAllDragging={stopAllDragging}
