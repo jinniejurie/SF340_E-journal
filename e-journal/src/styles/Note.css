@@ -4,6 +4,96 @@
   font-family: 'Unbounded', system-ui, sans-serif;
 }
 
+.note-book-cover-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  background: linear-gradient(135deg, #e9e6dd 0%, #d8d0c2 100%);
+  display: grid;
+  grid-template-columns: minmax(280px, 360px) 1fr;
+  align-items: center;
+  gap: 48px;
+  padding: 80px 8vw 40px;
+}
+
+.note-book-cover-settings {
+  background: rgba(255, 255, 255, 0.82);
+  border-radius: 16px;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.15);
+}
+
+.note-book-cover-settings label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  color: #3A3030;
+  font-size: 0.8rem;
+}
+
+.note-book-cover-settings input[type="text"] {
+  border: 1px solid #d4c7b4;
+  border-radius: 8px;
+  padding: 0.45rem 0.6rem;
+}
+
+.note-book-cover-settings button {
+  border: 0;
+  border-radius: 8px;
+  padding: 0.55rem 0.7rem;
+  background: #3A3030;
+  color: #fff;
+  cursor: pointer;
+}
+
+.note-book-cover-card {
+  justify-self: center;
+  width: 360px;
+  height: 500px;
+  border: 0;
+  border-radius: 10px 16px 16px 10px;
+  background-size: cover;
+  background-position: center;
+  color: #fff;
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+  transform-origin: left center;
+  transition: transform .5s ease, box-shadow .3s ease;
+  box-shadow: 0 26px 48px rgba(0, 0, 0, 0.28), 0 8px 12px rgba(0, 0, 0, 0.15);
+}
+
+.note-book-cover-card:hover {
+  transform: rotateY(-12deg) translateY(-2px);
+}
+
+.note-book-cover-card-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(150deg, rgba(255, 255, 255, 0.08), rgba(0, 0, 0, 0.35));
+}
+
+.note-book-cover-card h2,
+.note-book-cover-card p {
+  position: relative;
+  margin: 0;
+  text-shadow: 0 3px 8px rgba(0, 0, 0, 0.35);
+}
+
+.note-book-cover-card h2 {
+  font-size: 2rem;
+}
+
+.note-book-cover-title {
+  position: absolute !important;
+  transform: translate(-50%, -50%);
+  cursor: move;
+  user-select: none;
+}
+
 .note-loading {
   position: fixed;
   top: 70px;
@@ -378,6 +468,65 @@
   padding: 3rem;
   overflow: auto;
   position: relative;
+}
+
+.note-page--book-open .note-canvas {
+  max-width: 1280px;
+  margin: 0 auto;
+  min-height: calc(100vh - 80px);
+  border-radius: 10px;
+  box-shadow: 0 22px 44px rgba(0, 0, 0, 0.2);
+  overflow-x: hidden;
+  overflow-y: auto;
+  background:
+    linear-gradient(
+      90deg,
+      #f8f3e8 0%,
+      #f8f3e8 48.7%,
+      #d8cdbb 49.4%,
+      #c8baa5 50%,
+      #d8cdbb 50.6%,
+      #f8f3e8 51.3%,
+      #f8f3e8 100%
+    );
+}
+
+.note-page--book-open .note-content {
+  min-height: 980px;
+  transition: transform 0.28s ease;
+}
+
+.note-book-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 999px;
+  background: #fff;
+  color: #3A3030;
+  font-size: 32px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
+  z-index: 20;
+}
+
+.note-book-arrow--left { left: 10px; }
+.note-book-arrow--right { right: 10px; }
+
+.note-book-pagination {
+  position: absolute;
+  right: 22px;
+  bottom: 14px;
+  background: rgba(255, 255, 255, 0.85);
+  color: #3A3030;
+  border-radius: 999px;
+  padding: 0.25rem 0.7rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  z-index: 20;
 }
 
 .note-header {

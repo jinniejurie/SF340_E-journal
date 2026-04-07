@@ -751,7 +751,11 @@ function getNoteFromLocalStorage(storageKey) {
       shapes: withDefaultRotation(data.shapes),
       images: withDefaultRotation(data.images),
       stickers: withDefaultRotation(data.stickers),
-      maxZIndex: typeof data.maxZIndex === 'number' ? data.maxZIndex : 1
+      maxZIndex: typeof data.maxZIndex === 'number' ? data.maxZIndex : 1,
+      coverTitle: data.coverTitle ?? '',
+      coverColor: data.coverColor ?? '',
+      coverImage: data.coverImage ?? '',
+      coverTitlePos: data.coverTitlePos ?? null
     }
   } catch (e) {}
   return null
@@ -815,6 +819,12 @@ function Note() {
   const dateKey = latestNote?.date ?? null
 
   const [title, setTitle] = useState(latestNote?.name || '23 January 2026')
+  const [isBookOpen, setIsBookOpen] = useState(false)
+  const [coverTitle, setCoverTitle] = useState(latestNote?.name || 'My Journal')
+  const [coverColor, setCoverColor] = useState('#7b5636')
+  const [coverImage, setCoverImage] = useState('')
+  const [coverTitlePos, setCoverTitlePos] = useState({ x: 50, y: 43 })
+  const [spreadIndex, setSpreadIndex] = useState(0)
   const [isEditingTitle, setIsEditingTitle] = useState(false)
   const [tagName, setTagName] = useState(noteTag?.name || '🪰 Aura Loss')
   const [tagColor, setTagColor] = useState(noteTag?.color || '#FF6B6B')
@@ -927,6 +937,7 @@ function Note() {
   const [isContextMenuOpen, setIsContextMenuOpen] = useState(false)
   const canvasRef = useRef(null)
   const fileInputRef = useRef(null)
+  const coverImageInputRef = useRef(null)
   const activeDragHandlersRef = useRef({ mouseMove: null, mouseUp: null, contextMenu: null })
   const isRightClickRef = useRef(false)
   const stickerHostElementsRef = useRef(new Map())
@@ -938,6 +949,56 @@ function Note() {
   const persistSnapshotRef = useRef(null)
   const FIRESTORE_DEBOUNCE_MS = 2000
 
+  useEffect(() => {
+    if (!coverTitle || coverTitle === 'My Journal') {
+      setCoverTitle(title || 'My Journal')
+    }
+  }, [title, coverTitle])
+
+  const handleCoverImageUpload = (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      setCoverImage(String(ev.target?.result || ''))
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const handleCoverTitleMouseDown = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const card = e.currentTarget.closest('.note-book-cover-card')
+    if (!card) return
+    const rect = card.getBoundingClientRect()
+    const startX = e.clientX
+    const startY = e.clientY
+    const start = { ...coverTitlePos }
+
+    const onMove = (ev) => {
+      const dx = ((ev.clientX - startX) / rect.width) * 100
+      const dy = ((ev.clientY - startY) / rect.height) * 100
+      const x = Math.max(10, Math.min(90, start.x + dx))
+      const y = Math.max(12, Math.min(88, start.y + dy))
+      setCoverTitlePos({ x, y })
+    }
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }
+
+  const goToNextSpread = () => {
+    setSpreadIndex((prev) => prev + 1)
+  }
+
+  const goToPrevSpread = () => {
+    if (spreadIndex <= 0) return
+    setSpreadIndex((prev) => Math.max(0, prev - 1))
+  }
+
   persistSnapshotRef.current = {
     storageKey,
     dateKey,
@@ -948,7 +1009,11 @@ function Note() {
     shapes,
     images,
     stickers,
-    maxZIndex
+    maxZIndex,
+    coverTitle,
+    coverColor,
+    coverImage,
+    coverTitlePos
   }
 
   const flushPersistFromSnapshot = useCallback(() => {
@@ -964,7 +1029,11 @@ function Note() {
       shapes: s.shapes,
       images: s.images,
       stickers: s.stickers,
-      maxZIndex: s.maxZIndex
+      maxZIndex: s.maxZIndex,
+      coverTitle: s.coverTitle,
+      coverColor: s.coverColor,
+      coverImage: s.coverImage,
+      coverTitlePos: s.coverTitlePos
     }
     saveNoteToLocalStorage(s.storageKey, payload)
     if (auth?.currentUser && noteId && s.dateKey) {
@@ -994,6 +1063,12 @@ function Note() {
       if (Array.isArray(data.images)) setImages(withDefaultRotation(data.images))
       if (Array.isArray(data.stickers)) setStickers(withDefaultRotation(data.stickers))
       if (typeof data.maxZIndex === 'number') setMaxZIndex(data.maxZIndex)
+      if (data.coverTitle !== undefined) setCoverTitle(data.coverTitle || 'My Journal')
+      if (data.coverColor) setCoverColor(data.coverColor)
+      if (data.coverImage !== undefined) setCoverImage(data.coverImage || '')
+      if (data.coverTitlePos && typeof data.coverTitlePos.x === 'number' && typeof data.coverTitlePos.y === 'number') {
+        setCoverTitlePos(data.coverTitlePos)
+      }
     }
 
     const enableSave = () => {
@@ -1037,7 +1112,11 @@ function Note() {
       shapes,
       images,
       stickers,
-      maxZIndex
+      maxZIndex,
+      coverTitle,
+      coverColor,
+      coverImage,
+      coverTitlePos
     }
     saveNoteToLocalStorage(storageKey, payload)
 
@@ -1057,7 +1136,7 @@ function Note() {
         }
       }
     }
-  }, [storageKey, dateKey, title, tagName, tagColor, textBoxes, shapes, images, stickers, maxZIndex])
+  }, [storageKey, dateKey, title, tagName, tagColor, textBoxes, shapes, images, stickers, maxZIndex, coverTitle, coverColor, coverImage, coverTitlePos])
 
   // Listen for storage changes to sync in real-time
   useEffect(() => {
@@ -1402,6 +1481,17 @@ function Note() {
       const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0
       const modifier = isMac ? e.metaKey : e.ctrlKey
 
+      if (isBookOpen && !modifier && e.key === 'ArrowRight') {
+        e.preventDefault()
+        goToNextSpread()
+        return
+      }
+      if (isBookOpen && !modifier && e.key === 'ArrowLeft') {
+        e.preventDefault()
+        goToPrevSpread()
+        return
+      }
+
       if (e.key === 'Escape') {
         if (pendingPostItColor || isAddingTextBox || showPostItMenu) {
           e.preventDefault()
@@ -1452,7 +1542,7 @@ function Note() {
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [selectedItem, isEditingTitle, clipboard, pendingPostItColor, isAddingTextBox, showPostItMenu])
+  }, [selectedItem, isEditingTitle, clipboard, pendingPostItColor, isAddingTextBox, showPostItMenu, isBookOpen, spreadIndex])
 
   useEffect(() => {
     const onSelectionChange = () => {
@@ -2386,10 +2476,63 @@ function Note() {
   };
 
   return (
-    <div className="note-page">
+    <div className={`note-page ${isBookOpen ? 'note-page--book-open' : 'note-page--book-closed'}`}>
       {loading && (
         <div className="note-loading" aria-hidden="true">
           กำลังโหลด...
+        </div>
+      )}
+      {!isBookOpen && (
+        <div className="note-book-cover-overlay">
+          <div className="note-book-cover-settings">
+            <h3>Cover Settings</h3>
+            <label>
+              Title
+              <input
+                type="text"
+                value={coverTitle}
+                onChange={(e) => setCoverTitle(e.target.value)}
+                placeholder="Book title"
+              />
+            </label>
+            <label>
+              Color
+              <input
+                type="color"
+                value={coverColor}
+                onChange={(e) => setCoverColor(e.target.value)}
+              />
+            </label>
+            <button type="button" onClick={() => coverImageInputRef.current?.click()}>
+              Upload Cover Image
+            </button>
+            <input
+              ref={coverImageInputRef}
+              type="file"
+              accept="image/*"
+              onChange={handleCoverImageUpload}
+              style={{ display: 'none' }}
+            />
+          </div>
+          <button
+            type="button"
+            className="note-book-cover-card"
+            onClick={() => setIsBookOpen(true)}
+            style={{
+              backgroundColor: coverImage ? undefined : coverColor,
+              backgroundImage: coverImage ? `url(${coverImage})` : 'none'
+            }}
+          >
+            <div className="note-book-cover-card-overlay" />
+            <h2
+              className="note-book-cover-title"
+              style={{ left: `${coverTitlePos.x}%`, top: `${coverTitlePos.y}%` }}
+              onMouseDown={handleCoverTitleMouseDown}
+            >
+              {coverTitle || 'My Journal'}
+            </h2>
+            <p>Click to open</p>
+          </button>
         </div>
       )}
       <div className="note-navbar">
@@ -2403,6 +2546,13 @@ function Note() {
           }}
         >
           <ChevronLeft size={24} />
+        </button>
+        <button
+          type="button"
+          className="note-nav-btn"
+          onClick={() => setIsBookOpen((prev) => !prev)}
+        >
+          {isBookOpen ? 'Close Book' : 'Open Book'}
         </button>
 
         <div className="note-nav-controls">
@@ -2752,7 +2902,7 @@ function Note() {
       </div>
 
       <div 
-        className="note-canvas" 
+        className="note-canvas"
         ref={canvasRef}
         onContextMenu={handleCanvasContextMenu}
         onClick={(e) => {
@@ -2767,6 +2917,20 @@ function Note() {
             setShowColorPicker(false);
             handleSelectItem(null);
           }
+          if (isBookOpen && !isAddingTextBox && !pendingPostItColor && (e.target === canvasRef.current || e.target.classList.contains('note-content'))) {
+            const rect = canvasRef.current?.getBoundingClientRect()
+            if (rect) {
+              const x = e.clientX - rect.left
+              if (x > rect.width * 0.55) {
+                goToNextSpread()
+                return
+              }
+              if (x < rect.width * 0.45) {
+                goToPrevSpread()
+                return
+              }
+            }
+          }
           handleCanvasClick(e);
         }}
         onMouseDown={(e) => {
@@ -2777,6 +2941,17 @@ function Note() {
         }}
         style={{ cursor: isAddingTextBox || pendingPostItColor ? 'crosshair' : 'default' }}
       >
+        {isBookOpen && (
+          <>
+            <button type="button" className="note-book-arrow note-book-arrow--left" onClick={goToPrevSpread} aria-label="Previous spread">
+              ‹
+            </button>
+            <button type="button" className="note-book-arrow note-book-arrow--right" onClick={goToNextSpread} aria-label="Next spread">
+              ›
+            </button>
+            <div className="note-book-pagination">p. {spreadIndex * 2 + 1}-{spreadIndex * 2 + 2}</div>
+          </>
+        )}
         <div className="note-header">
           <div className="note-header-left">
             {isEditingTitle ? (
@@ -2901,7 +3076,10 @@ function Note() {
           </div>
         </div>
 
-        <div className="note-content">
+        <div
+          className="note-content"
+          style={{ transform: isBookOpen ? `translateX(-${spreadIndex * 1120}px)` : undefined }}
+        >
           {[...textBoxes, ...shapes.map(s => ({ ...s, elementType: 'shape' })), ...images.map(i => ({ ...i, elementType: 'image' })), ...stickers.map(s => ({ ...s, elementType: 'sticker' }))]
             .sort((a, b) => (a.zIndex || 0) - (b.zIndex || 0))
             .map((element) => {

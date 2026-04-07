@@ -22,7 +22,11 @@ export async function getNoteFromFirestore(noteId) {
     shapes: Array.isArray(data.shapes) ? data.shapes : [],
     images: Array.isArray(data.images) ? data.images : [],
     stickers: Array.isArray(data.stickers) ? data.stickers : [],
-    maxZIndex: typeof data.maxZIndex === 'number' ? data.maxZIndex : 1
+    maxZIndex: typeof data.maxZIndex === 'number' ? data.maxZIndex : 1,
+    coverTitle: data.coverTitle ?? '',
+    coverColor: data.coverColor ?? '',
+    coverImage: data.coverImage ?? '',
+    coverTitlePos: data.coverTitlePos ?? null
   }
 }
 
