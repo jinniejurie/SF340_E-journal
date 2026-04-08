@@ -814,6 +814,26 @@
   color: #888;
 }
 
+.note-bookmark-btn {
+  border: none;
+  background: transparent;
+  color: #b4b4b4;
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0.2rem 0.35rem;
+  border-radius: 6px;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.note-bookmark-btn:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.note-bookmark-btn.is-active {
+  color: #f2b705;
+}
+
 .note-item-menu-wrapper {
   position: relative;
   flex-shrink: 0;
