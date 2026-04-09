@@ -1,4 +1,6 @@
-import { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react'
+import html2canvas from 'html2canvas'
+import { jsPDF } from 'jspdf'
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import { Resizable } from 're-resizable'
 import { 
@@ -101,6 +103,87 @@ const TEXT_HIGHLIGHT_PALETTE = [
 ]
 
 const NOTE_STORAGE_KEY = (id) => `ejournal-note-${id ?? 'draft'}`
+
+// ---- Page model ----
+// เมื่อเปิดหนังสือ elements แต่ละตัวจะถูกวางใน .note-page-sheet ของหน้าตัวเอง
+// x,y ใน state = พิกัดภายในหน้า (0…PAGE_WIDTH, 0…PAGE_HEIGHT)
+// pageIndex บอกว่าอยู่หน้าไหน (0-based)
+// ข้อมูลเก่าที่ไม่มี pageIndex จะถูกแปลงอัตโนมัติจาก x ที่ต่อเนื่อง
+const PAGE_W = 560
+const PAGE_H = 794  // A4 landscape (half-spread): 148.5 × 210mm @ ~96dpi
+
+function _clamp(n, lo, hi) {
+  return Number.isNaN(n) ? lo : Math.max(lo, Math.min(hi, n))
+}
+
+/** แปลง x,y ต่อเนื่อง → { pageIndex, x, y } ภายในหน้า */
+function toPagedPos(absX, absY) {
+  const pi = Math.max(0, Math.floor(absX / PAGE_W))
+  return { pageIndex: pi, x: absX - pi * PAGE_W, y: absY }
+}
+
+/** ตรวจสอบและ normalize element ให้มี pageIndex, x, y ที่ถูกต้อง */
+function normPaged(el) {
+  if (!el || typeof el !== 'object') return el
+  const rawX = typeof el.x === 'number' && !Number.isNaN(el.x) ? el.x : 0
+  const rawY = typeof el.y === 'number' && !Number.isNaN(el.y) ? el.y : 0
+  if (typeof el.pageIndex === 'number' && !Number.isNaN(el.pageIndex)) {
+    return { ...el, pageIndex: Math.max(0, Math.floor(el.pageIndex)), x: rawX, y: rawY }
+  }
+  // ไม่มี pageIndex = ข้อมูลเก่า, x เดิมคือพิกัดต่อเนื่อง
+  const pi = Math.max(0, Math.floor(rawX / PAGE_W))
+  return { ...el, pageIndex: pi, x: rawX - pi * PAGE_W, y: rawY }
+}
+
+/** clamp ให้ element อยู่ในหน้า โดยพิจารณาขนาด */
+function clampInPage(el, nx, ny, nw, nh) {
+  const w = typeof nw === 'number' ? nw : (el?.width ?? 0)
+  const h = typeof nh === 'number' ? nh : (el?.height ?? 0)
+  return {
+    x: _clamp(nx, 0, Math.max(0, PAGE_W - w)),
+    y: _clamp(ny, 0, Math.max(0, PAGE_H - h))
+  }
+}
+
+/**
+ * เลื่อน element ข้ามสองหน้าในคู่เดียวกัน (book mode) หรือ clamp ในหน้าเดียว
+ * startEl = snapshot ของ element ตอนเริ่ม drag  (ต้องมี pageIndex, x, y, width, height)
+ * dx/dy   = pixel delta จาก mousedown ถึงปัจจุบัน
+ * bookOpen  = isBookOpen ณ ตอน drag start
+ * si        = spreadIndex ณ ตอน drag start
+ */
+function dragWithPageTransfer(startEl, dx, dy, bookOpen, si) {
+  const w = startEl.width || 0
+  const h = startEl.height || 0
+  if (!bookOpen) {
+    return {
+      pageIndex: startEl.pageIndex,
+      x: _clamp(startEl.x + dx, 0, Math.max(0, PAGE_W - w)),
+      y: _clamp(startEl.y + dy, 0, Math.max(0, PAGE_H - h)),
+    }
+  }
+  const pageOffset = startEl.pageIndex - si * 2   // 0 = left, 1 = right
+  if (pageOffset < 0 || pageOffset > 1) {
+    return {
+      pageIndex: startEl.pageIndex,
+      x: _clamp(startEl.x + dx, 0, Math.max(0, PAGE_W - w)),
+      y: _clamp(startEl.y + dy, 0, Math.max(0, PAGE_H - h)),
+    }
+  }
+  const spreadX = pageOffset * PAGE_W + startEl.x + dx
+  const clampedSpreadX = _clamp(spreadX, 0, Math.max(0, PAGE_W * 2 - w))
+  const clampedY = _clamp(startEl.y + dy, 0, Math.max(0, PAGE_H - h))
+  const newOffset = clampedSpreadX >= PAGE_W ? 1 : 0
+  return {
+    pageIndex: si * 2 + newOffset,
+    x: clampedSpreadX - newOffset * PAGE_W,
+    y: clampedY,
+  }
+}
+
+/** absX สำหรับ note-content ในโหมดปิดหนังสือ */
+function absX(el) { return (el?.pageIndex ?? 0) * PAGE_W + (el?.x ?? 0) }
+function absY(el) { return el?.y ?? 0 }
 
 /** Single source of truth for textbox body size; never read font-size from HTML */
 const DEFAULT_TEXTBOX_FONT_SIZE = 14
@@ -456,7 +539,9 @@ function NoteTextEditor({
   setIsDragging,
   skipPersistDuringCanvasDragRef,
   flushPersistFromSnapshot,
-  handleContextMenu
+  handleContextMenu,
+  isBookOpen,
+  spreadIndex,
 }) {
   const elRef = useRef(null)
   const lastCommittedHtml = useRef(null)
@@ -656,35 +741,27 @@ function NoteTextEditor({
         isRightClickRef.current = false
         const startX = e.clientX
         const startY = e.clientY
-        const startPosX = textBox.x
-        const startPosY = textBox.y
+        const startEl = { ...textBox }; const capBookOpen = isBookOpen; const capSpreadIdx = spreadIndex;
         let hasMoved = false
         let dragging = false
 
         const handleMouseMove = (moveEvent) => {
-          if (isRightClickRef.current || isContextMenuOpen) {
-            stopAllDragging()
-            return
-          }
-          const deltaX = Math.abs(moveEvent.clientX - startX)
-          const deltaY = Math.abs(moveEvent.clientY - startY)
-          if ((deltaX > 5 || deltaY > 5) && !dragging) {
-            dragging = true
-            hasMoved = true
-            setIsDragging(true)
-            skipPersistDuringCanvasDragRef.current = true
-            moveEvent.preventDefault()
+          if (isRightClickRef.current || isContextMenuOpen) { stopAllDragging(); return; }
+          const absDx = Math.abs(moveEvent.clientX - startX)
+          const absDy = Math.abs(moveEvent.clientY - startY)
+          if ((absDx > 5 || absDy > 5) && !dragging) {
+            dragging = true; hasMoved = true; setIsDragging(true); skipPersistDuringCanvasDragRef.current = true; moveEvent.preventDefault();
           }
           if (dragging) {
             moveEvent.preventDefault()
             const finalDeltaX = moveEvent.clientX - startX
             const finalDeltaY = moveEvent.clientY - startY
             setTextBoxes((prevTextBoxes) =>
-              prevTextBoxes.map((tb) =>
-                tb.id === textBox.id
-                  ? { ...tb, x: startPosX + finalDeltaX, y: startPosY + finalDeltaY }
-                  : tb
-              )
+              prevTextBoxes.map((tb) => {
+                if (tb.id !== textBox.id) return tb
+                const pos = dragWithPageTransfer(startEl, finalDeltaX, finalDeltaY, capBookOpen, capSpreadIdx)
+                return { ...tb, pageIndex: pos.pageIndex, x: pos.x, y: pos.y }
+              })
             )
           }
         }
@@ -825,6 +902,7 @@ function Note() {
   const [coverImage, setCoverImage] = useState('')
   const [coverTitlePos, setCoverTitlePos] = useState({ x: 50, y: 43 })
   const [spreadIndex, setSpreadIndex] = useState(0)
+  // 0 = หน้าซ้าย (left page), 1 = หน้าขวา (right page) ของ spread ปัจจุบัน
   const [isEditingTitle, setIsEditingTitle] = useState(false)
   const [tagName, setTagName] = useState(noteTag?.name || '🪰 Aura Loss')
   const [tagColor, setTagColor] = useState(noteTag?.color || '#FF6B6B')
@@ -990,14 +1068,13 @@ function Note() {
     document.addEventListener('mouseup', onUp)
   }
 
-  const goToNextSpread = () => {
+  const goToNextSpread = useCallback(() => {
     setSpreadIndex((prev) => prev + 1)
-  }
+  }, [])
 
-  const goToPrevSpread = () => {
-    if (spreadIndex <= 0) return
+  const goToPrevSpread = useCallback(() => {
     setSpreadIndex((prev) => Math.max(0, prev - 1))
-  }
+  }, [])
 
   persistSnapshotRef.current = {
     storageKey,
@@ -1058,10 +1135,10 @@ function Note() {
       if (data.title !== undefined) setTitle(data.title)
       if (data.tagName !== undefined) setTagName(data.tagName)
       if (data.tagColor !== undefined) setTagColor(data.tagColor)
-      if (Array.isArray(data.textBoxes)) setTextBoxes(withDefaultRotation(data.textBoxes))
-      if (Array.isArray(data.shapes)) setShapes(withDefaultRotation(data.shapes))
-      if (Array.isArray(data.images)) setImages(withDefaultRotation(data.images))
-      if (Array.isArray(data.stickers)) setStickers(withDefaultRotation(data.stickers))
+      if (Array.isArray(data.textBoxes)) setTextBoxes(withDefaultRotation(data.textBoxes).map(normPaged))
+      if (Array.isArray(data.shapes)) setShapes(withDefaultRotation(data.shapes).map(normPaged))
+      if (Array.isArray(data.images)) setImages(withDefaultRotation(data.images).map(normPaged))
+      if (Array.isArray(data.stickers)) setStickers(withDefaultRotation(data.stickers).map(normPaged))
       if (typeof data.maxZIndex === 'number') setMaxZIndex(data.maxZIndex)
       if (data.coverTitle !== undefined) setCoverTitle(data.coverTitle || 'My Journal')
       if (data.coverColor) setCoverColor(data.coverColor)
@@ -1615,23 +1692,32 @@ function Note() {
     return () => document.removeEventListener('mousedown', closePalette, true)
   }, [formatPaletteOpen])
 
+  // หน้าปัจจุบันที่ active (ซ้าย/ขวา) สำหรับวาง element ใหม่
+  const currentPageIndex = isBookOpen ? spreadIndex * 2 : 0
+
   const handleCanvasClick = (e) => {
-    const onCanvasBg = e.target === canvasRef.current || e.target.classList.contains('note-content')
+    const target = e.target
+    const onCanvasBg =
+      target === canvasRef.current ||
+      target.classList?.contains('note-content') ||
+      target.classList?.contains('note-page-sheet')
 
     if (pendingPostItColor && canvasRef.current && onCanvasBg) {
-      const { x, y } = clientPointToNoteContentCoords(
+      const { x: ax, y: ay } = clientPointToNoteContentCoords(
         canvasRef.current,
         e.clientX,
         e.clientY
       )
+      const paged = isBookOpen ? toPagedPos(ax, ay) : { pageIndex: 0, x: ax, y: ay }
       const newTextBoxId = Date.now().toString()
       const newZIndex = maxZIndex + 1
       const entry = POSTIT_PALETTE.find((p) => p.color === pendingPostItColor) || POSTIT_PALETTE[0]
       const newTextBox = {
         id: newTextBoxId,
         content: '',
-        x,
-        y,
+        pageIndex: paged.pageIndex,
+        x: paged.x,
+        y: paged.y,
         width: 200,
         height: 176,
         rotation: 0,
@@ -1659,19 +1745,21 @@ function Note() {
 
     if (!isAddingTextBox || !canvasRef.current) return
 
-    const { x, y } = clientPointToNoteContentCoords(
+    const { x: ax2, y: ay2 } = clientPointToNoteContentCoords(
       canvasRef.current,
       e.clientX,
       e.clientY
     )
+    const paged2 = isBookOpen ? toPagedPos(ax2, ay2) : { pageIndex: 0, x: ax2, y: ay2 }
 
     const newTextBoxId = Date.now().toString()
     const newZIndex = maxZIndex + 1
     const newTextBox = {
       id: newTextBoxId,
       content: '',
-      x,
-      y,
+      pageIndex: paged2.pageIndex,
+      x: paged2.x,
+      y: paged2.y,
       width: 200,
       height: 100,
       rotation: 0,
@@ -1687,22 +1775,23 @@ function Note() {
   }
 
   const addShape = (type, clickX = null, clickY = null) => {
-    let x = 400;
-    let y = 300;
+    let ax = currentPageIndex * PAGE_W + 200
+    let ay = 200
     
-    // If click position provided, use it
     if (clickX !== null && clickY !== null && canvasRef.current) {
       const p = clientPointToNoteContentCoords(canvasRef.current, clickX, clickY)
-      x = p.x
-      y = p.y
+      ax = p.x
+      ay = p.y
     }
+    const paged = isBookOpen ? toPagedPos(ax, ay) : { pageIndex: 0, x: ax, y: ay }
     
     const newZIndex = maxZIndex + 1;
     const newShape = {
       id: Date.now().toString(),
       type,
-      x,
-      y,
+      pageIndex: paged.pageIndex,
+      x: paged.x,
+      y: paged.y,
       width: type === 'line' ? 200 : 100,
       height: type === 'line' ? 2 : 100,
       fillColor: 'transparent',
@@ -1720,22 +1809,26 @@ function Note() {
   };
 
   const addSticker = (stickerSrc, clickX = null, clickY = null) => {
-    let x = 300;
-    let y = 400;
-    
-    // If click position provided, use it
+    // ใน book mode: วางกลาง spread (หน้าซ้ายใกล้สัน) เพื่อให้ drag ไปหน้าไหนก็ได้
+    let ax = isBookOpen
+      ? spreadIndex * 2 * PAGE_W + (PAGE_W / 2 - 75)   // กลางหน้าซ้าย
+      : currentPageIndex * PAGE_W + 180
+    let ay = 200
+
     if (clickX !== null && clickY !== null && canvasRef.current) {
       const p = clientPointToNoteContentCoords(canvasRef.current, clickX, clickY)
-      x = p.x
-      y = p.y
+      ax = p.x
+      ay = p.y
     }
+    const paged = isBookOpen ? toPagedPos(ax, ay) : { pageIndex: 0, x: ax, y: ay }
     
     const newZIndex = maxZIndex + 1;
     const newSticker = {
       id: Date.now().toString(),
       src: stickerSrc,
-      x,
-      y,
+      pageIndex: paged.pageIndex,
+      x: paged.x,
+      y: paged.y,
       width: 150,
       height: 150,
       rotation: 0,
@@ -1760,8 +1853,9 @@ function Note() {
       const newImage = {
         id: Date.now().toString(),
         src: event.target?.result,
-        x: 300,
-        y: 300,
+        pageIndex: currentPageIndex,
+        x: 80,
+        y: 80,
         width: 300,
         height: 200,
         rotation: 0,
@@ -2171,8 +2265,35 @@ function Note() {
     setShapes(shapes.map(s => s.id === id ? { ...s, strokeWidth } : s));
   };
 
-  const downloadAsPDF = () => {
-    alert('Download as PDF - In production, this would generate a PDF of the note');
+  const exportPageRef = useRef(null)
+  const [isExportingPdf, setIsExportingPdf] = useState(false)
+  const [exportPageIndex, setExportPageIndex] = useState(null)
+
+  const downloadAsPDF = async () => {
+    if (isExportingPdf) return
+    setIsExportingPdf(true)
+    try {
+      const pdf = new jsPDF({ orientation: 'portrait', unit: 'px', format: [PAGE_W, PAGE_H] })
+      for (let pi = 0; pi < totalPages; pi++) {
+        setExportPageIndex(pi)
+        await new Promise(r => setTimeout(r, 120))
+        if (!exportPageRef.current) continue
+        const canvas = await html2canvas(exportPageRef.current, {
+          scale: 2,
+          useCORS: true,
+          backgroundColor: '#f8f3e8'
+        })
+        const imgData = canvas.toDataURL('image/jpeg', 0.92)
+        if (pi > 0) pdf.addPage()
+        pdf.addImage(imgData, 'JPEG', 0, 0, PAGE_W, PAGE_H)
+      }
+      pdf.save(`${title || 'note'}.pdf`)
+    } catch (err) {
+      console.error('PDF export error:', err)
+    } finally {
+      setIsExportingPdf(false)
+      setExportPageIndex(null)
+    }
   };
 
   const shareAsLink = () => {
@@ -2271,11 +2392,14 @@ function Note() {
           setIsDragging(false);
         }}
         onResizeStop={(e, direction, ref, d) => {
-          setShapes(prevShapes => prevShapes.map(s =>
-            s.id === shape.id
-              ? { ...s, width: s.width + d.width, height: s.height + d.height }
-              : s
-          ));
+          setShapes(prevShapes => prevShapes.map(s => {
+            if (s.id !== shape.id) return s
+            const n = normPaged(s)
+            const nw = Math.max(10, n.width + d.width)
+            const nh = Math.max(10, n.height + d.height)
+            const c = clampInPage(n, n.x, n.y, nw, nh)
+            return { ...n, x: c.x, y: c.y, width: nw, height: nh }
+          }));
           setIsResizing(false);
           setTimeout(() => saveToHistory(), 50)
         }}
@@ -2328,31 +2452,20 @@ function Note() {
             
             const startX = e.clientX;
             const startY = e.clientY;
-            const startPosX = shape.x;
-            const startPosY = shape.y;
+            const startEl = { ...shape }; const capBookOpen = isBookOpen; const capSpreadIdx = spreadIndex;
             let hasMoved = false;
 
             const handleMouseMove = (moveEvent) => {
-              // Don't drag if context menu is open
-              if (isContextMenuOpen) {
-                stopAllDragging();
-                return;
-              }
-              
-              if (!hasMoved) {
-                setIsDragging(true);
-                hasMoved = true;
-                skipPersistDuringCanvasDragRef.current = true;
-              }
+              if (isContextMenuOpen) { stopAllDragging(); return; }
+              if (!hasMoved) { setIsDragging(true); hasMoved = true; skipPersistDuringCanvasDragRef.current = true; }
               moveEvent.preventDefault();
               const deltaX = moveEvent.clientX - startX;
               const deltaY = moveEvent.clientY - startY;
-              
-              setShapes(prevShapes => prevShapes.map(s =>
-                s.id === shape.id
-                  ? { ...s, x: startPosX + deltaX, y: startPosY + deltaY }
-                  : s
-              ));
+              setShapes(prevShapes => prevShapes.map(s => {
+                if (s.id !== shape.id) return s
+                const pos = dragWithPageTransfer(startEl, deltaX, deltaY, capBookOpen, capSpreadIdx)
+                return { ...s, pageIndex: pos.pageIndex, x: pos.x, y: pos.y }
+              }));
             };
 
             const handleMouseUp = () => {
@@ -2389,25 +2502,20 @@ function Note() {
             const touch = e.touches[0];
             const startX = touch.clientX;
             const startY = touch.clientY;
-            const startPosX = shape.x;
-            const startPosY = shape.y;
+            const startElT = { ...shape }; const capBookOpenT = isBookOpen; const capSpreadIdxT = spreadIndex;
             let touchMoved = false;
 
             const handleTouchMove = (moveEvent) => {
               moveEvent.preventDefault();
-              if (!touchMoved) {
-                touchMoved = true;
-                skipPersistDuringCanvasDragRef.current = true;
-              }
-              const touch = moveEvent.touches[0];
-              const deltaX = touch.clientX - startX;
-              const deltaY = touch.clientY - startY;
-              
-              setShapes(prevShapes => prevShapes.map(s =>
-                s.id === shape.id
-                  ? { ...s, x: startPosX + deltaX, y: startPosY + deltaY }
-                  : s
-              ));
+              if (!touchMoved) { touchMoved = true; skipPersistDuringCanvasDragRef.current = true; }
+              const tc = moveEvent.touches[0];
+              const deltaX = tc.clientX - startX;
+              const deltaY = tc.clientY - startY;
+              setShapes(prevShapes => prevShapes.map(s => {
+                if (s.id !== shape.id) return s
+                const pos = dragWithPageTransfer(startElT, deltaX, deltaY, capBookOpenT, capSpreadIdxT)
+                return { ...s, pageIndex: pos.pageIndex, x: pos.x, y: pos.y }
+              }));
             };
 
             const handleTouchEnd = () => {
@@ -2474,6 +2582,24 @@ function Note() {
       </Resizable>
     );
   };
+
+  // ---- สร้าง element list ที่ normalize แล้ว + จัดกลุ่มตาม page ----
+  const allSortedElements = useMemo(() => {
+    const raw = [
+      ...textBoxes.map(tb => normPaged(tb)),
+      ...shapes.map(s => ({ ...normPaged(s), elementType: 'shape' })),
+      ...images.map(i => ({ ...normPaged(i), elementType: 'image' })),
+      ...stickers.map(s => ({ ...normPaged(s), elementType: 'sticker' }))
+    ]
+    return raw.sort((a, b) => (a.zIndex || 0) - (b.zIndex || 0))
+  }, [textBoxes, shapes, images, stickers])
+
+  const totalPages = useMemo(() => {
+    const maxPage = allSortedElements.reduce((m, el) => Math.max(m, el.pageIndex ?? 0), 0)
+    // ต้อง render อย่างน้อย 2 หน้าของ spread ปัจจุบัน + ทุกหน้าที่มี element
+    const minFromSpread = (spreadIndex + 1) * 2
+    return Math.max(minFromSpread, maxPage + 1)
+  }, [allSortedElements, spreadIndex])
 
   return (
     <div className={`note-page ${isBookOpen ? 'note-page--book-open' : 'note-page--book-closed'}`}>
@@ -2554,6 +2680,128 @@ function Note() {
         >
           {isBookOpen ? 'Close Book' : 'Open Book'}
         </button>
+
+        {/* ชื่อ Note + Tag ใน navbar */}
+        <div className="note-nav-meta">
+          {isEditingTitle ? (
+            <input
+              className="note-title-input note-title-input--nav"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              onBlur={() => {
+                setIsEditingTitle(false)
+                setTimeout(() => saveToHistory(), 50)
+              }}
+              autoFocus
+            />
+          ) : (
+            <span className="note-title--nav" onClick={() => setIsEditingTitle(true)}>
+              {title || 'Untitled'}
+            </span>
+          )}
+          {showTagSelector ? (
+            <div className="note-tag-selector note-tag-selector--nav" onClick={(e) => e.stopPropagation()}>
+              <div className="tag-selector-header">
+                <button
+                  type="button"
+                  className="back-btn"
+                  aria-label="Close tag selector"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowTagSelector(false);
+                    setIsCreatingNewTag(false);
+                  }}
+                >←</button>
+                <h4>Select Tag</h4>
+              </div>
+              {!isCreatingNewTag ? (
+                <>
+                  <div className="tag-list">
+                    {getTags().map(tag => (
+                      <div
+                        key={tag.id}
+                        className="tag-option"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          selectTag(tag);
+                        }}
+                        style={{ backgroundColor: tag.color }}
+                      >
+                        {tag.name}
+                      </div>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    className="create-tag-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsCreatingNewTag(true);
+                    }}
+                  >
+                    + Create New Tag
+                  </button>
+                </>
+              ) : (
+                <div className="create-tag-form">
+                  <input
+                    type="text"
+                    placeholder="Tag name"
+                    value={newTagName}
+                    onChange={(e) => setNewTagName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && newTagName.trim()) {
+                        createNewTag();
+                      }
+                    }}
+                    style={{ marginBottom: '0.5rem', padding: '0.5rem', border: '1px solid #e0e0e0', borderRadius: '4px' }}
+                    autoFocus
+                  />
+                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.5rem' }}>
+                    <input
+                      type="color"
+                      value={newTagColor}
+                      onChange={(e) => setNewTagColor(e.target.value)}
+                      style={{ width: '40px', height: '40px', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                    />
+                    <span style={{ fontSize: '0.85rem', color: '#666' }}>Color</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="save-tag-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      createNewTag();
+                    }}
+                    disabled={!newTagName.trim()}
+                  >
+                    Save
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div
+              className="note-tag"
+              style={{ backgroundColor: tagColor }}
+              role="button"
+              aria-label="Select or create tag"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setShowTagSelector(true);
+                }
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowTagSelector(true);
+              }}
+            >
+              {tagName}
+            </div>
+          )}
+        </div>
 
         <div className="note-nav-controls">
           <span className="note-nav-tooltip-host" data-tooltip="Undo">
@@ -2906,8 +3154,13 @@ function Note() {
         ref={canvasRef}
         onContextMenu={handleCanvasContextMenu}
         onClick={(e) => {
+          const onBg = e.target === canvasRef.current ||
+            e.target.classList?.contains('note-content') ||
+            e.target.classList?.contains('note-page-sheet') ||
+            e.target.classList?.contains('note-book-viewport')
+
           // Close all menus and tag selector when clicking on canvas
-          if (e.target === canvasRef.current || e.target.classList.contains('note-content')) {
+          if (onBg) {
             setShowTagSelector(false);
             setIsCreatingNewTag(false);
             setShowShapesMenu(false);
@@ -2916,20 +3169,6 @@ function Note() {
             setShowShareMenu(false);
             setShowColorPicker(false);
             handleSelectItem(null);
-          }
-          if (isBookOpen && !isAddingTextBox && !pendingPostItColor && (e.target === canvasRef.current || e.target.classList.contains('note-content'))) {
-            const rect = canvasRef.current?.getBoundingClientRect()
-            if (rect) {
-              const x = e.clientX - rect.left
-              if (x > rect.width * 0.55) {
-                goToNextSpread()
-                return
-              }
-              if (x < rect.width * 0.45) {
-                goToPrevSpread()
-                return
-              }
-            }
           }
           handleCanvasClick(e);
         }}
@@ -2941,148 +3180,33 @@ function Note() {
         }}
         style={{ cursor: isAddingTextBox || pendingPostItColor ? 'crosshair' : 'default' }}
       >
-        {isBookOpen && (
-          <>
+        {isBookOpen ? (
+          /* Book mode: viewport wrapper (overflow:visible) ➜ clip-wrapper (overflow:hidden) ➜ pages */
+          <div className="note-book-viewport">
+            {/* Arrows วางนอก clip area */}
             <button type="button" className="note-book-arrow note-book-arrow--left" onClick={goToPrevSpread} aria-label="Previous spread">
               ‹
             </button>
             <button type="button" className="note-book-arrow note-book-arrow--right" onClick={goToNextSpread} aria-label="Next spread">
               ›
             </button>
-            <div className="note-book-pagination">p. {spreadIndex * 2 + 1}-{spreadIndex * 2 + 2}</div>
-          </>
-        )}
-        <div className="note-header">
-          <div className="note-header-left">
-            {isEditingTitle ? (
-              <input
-                className="note-title-input"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                onBlur={() => {
-                  setIsEditingTitle(false)
-                  setTimeout(() => saveToHistory(), 50)
-                }}
-                autoFocus
-              />
-            ) : (
-              <h1 className="note-title" onClick={() => setIsEditingTitle(true)}>
-                {title}
-              </h1>
-            )}
 
-            {showTagSelector ? (
-              <div className="note-tag-selector" onClick={(e) => e.stopPropagation()}>
-                <div className="tag-selector-header">
-                  <button
-                    type="button"
-                    className="back-btn"
-                    aria-label="Close tag selector"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setShowTagSelector(false);
-                      setIsCreatingNewTag(false);
-                    }}
-                  >←</button>
-                  <h4>Select Tag</h4>
-                </div>
-                {!isCreatingNewTag ? (
-                  <>
-                    <div className="tag-list">
-                      {getTags().map(tag => (
-                        <div
-                          key={tag.id}
-                          className="tag-option"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            selectTag(tag);
-                          }}
-                          style={{ backgroundColor: tag.color }}
-                        >
-                          {tag.name}
-                        </div>
-                      ))}
-                    </div>
-                    <button
-                      type="button"
-                      className="create-tag-btn"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setIsCreatingNewTag(true);
-                      }}
-                    >
-                      + Create New Tag
-                    </button>
-                  </>
-                ) : (
-                  <div className="create-tag-form">
-                    <input
-                      type="text"
-                      placeholder="Tag name"
-                      value={newTagName}
-                      onChange={(e) => setNewTagName(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && newTagName.trim()) {
-                          createNewTag();
-                        }
-                      }}
-                      style={{ marginBottom: '0.5rem', padding: '0.5rem', border: '1px solid #e0e0e0', borderRadius: '4px' }}
-                      autoFocus
-                    />
-                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.5rem' }}>
-                      <input
-                        type="color"
-                        value={newTagColor}
-                        onChange={(e) => setNewTagColor(e.target.value)}
-                        style={{ width: '40px', height: '40px', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
-                      />
-                      <span style={{ fontSize: '0.85rem', color: '#666' }}>Color</span>
-                    </div>
-                    <button
-                      type="button"
-                      className="save-tag-btn"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        createNewTag();
-                      }}
-                      disabled={!newTagName.trim()}
-                    >
-                      Save
-                    </button>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div
-                className="note-tag"
-                style={{ backgroundColor: tagColor }}
-                role="button"
-                aria-label="Select or create tag"
-                tabIndex={0}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    setShowTagSelector(true);
-                  }
-                }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setShowTagSelector(true);
-                }}
-              >
-                {tagName}
-              </div>
-            )}
-          </div>
-        </div>
+            {/* Pagination วางใต้ spread */}
+            <div className="note-book-pagination">
+              <span className="page-num-label">
+                p.{spreadIndex * 2 + 1} – p.{spreadIndex * 2 + 2}
+              </span>
+            </div>
 
-        <div
-          className="note-content"
-          style={{ transform: isBookOpen ? `translateX(-${spreadIndex * 1120}px)` : undefined }}
-        >
-          {[...textBoxes, ...shapes.map(s => ({ ...s, elementType: 'shape' })), ...images.map(i => ({ ...i, elementType: 'image' })), ...stickers.map(s => ({ ...s, elementType: 'sticker' }))]
-            .sort((a, b) => (a.zIndex || 0) - (b.zIndex || 0))
-            .map((element) => {
+            {/* Clip container: clamp the sliding pages only */}
+            <div className={`note-book-pages-clip${isDragging ? ' note-book-pages-clip--dragging' : ''}`}>
+            <div
+              className="note-content note-content--pages"
+              style={{ transform: `translateX(-${spreadIndex * PAGE_W * 2}px)` }}
+            >
+              {Array.from({ length: totalPages }, (_, pi) => {
+                return (<div key={pi} className="note-page-sheet">
+                  {allSortedElements.filter(el => (el.pageIndex ?? 0) === pi).map((element) => {
               if (element.elementType === 'shape') {
                 const shape = element;
                 const isSelected = selectedItem?.type === 'shape' && selectedItem.id === shape.id;
@@ -3099,11 +3223,14 @@ function Note() {
                       setIsDragging(false);
                     }}
                     onResizeStop={(e, direction, ref, d) => {
-                      setImages(prevImages => prevImages.map(img =>
-                        img.id === image.id
-                          ? { ...img, width: img.width + d.width, height: img.height + d.height }
-                          : img
-                      ));
+                      setImages(prevImages => prevImages.map(img => {
+                        if (img.id !== image.id) return img
+                        const n = normPaged(img)
+                        const nw = Math.max(10, n.width + d.width)
+                        const nh = Math.max(10, n.height + d.height)
+                        const c = clampInPage(n, n.x, n.y, nw, nh)
+                        return { ...n, x: c.x, y: c.y, width: nw, height: nh }
+                      }));
                       setIsResizing(false);
                       setTimeout(() => saveToHistory(), 50)
                     }}
@@ -3172,31 +3299,20 @@ function Note() {
                         
                         const startX = e.clientX;
                         const startY = e.clientY;
-                        const startPosX = image.x;
-                        const startPosY = image.y;
+                        const startEl = { ...image }; const capBookOpen = isBookOpen; const capSpreadIdx = spreadIndex;
                         let hasMoved = false;
 
                         const handleMouseMove = (moveEvent) => {
-                          // Don't drag if context menu is open
-                          if (isContextMenuOpen) {
-                            stopAllDragging();
-                            return;
-                          }
-                          
-                          if (!hasMoved) {
-                            setIsDragging(true);
-                            hasMoved = true;
-                            skipPersistDuringCanvasDragRef.current = true;
-                          }
+                          if (isContextMenuOpen) { stopAllDragging(); return; }
+                          if (!hasMoved) { setIsDragging(true); hasMoved = true; skipPersistDuringCanvasDragRef.current = true; }
                           moveEvent.preventDefault();
                           const deltaX = moveEvent.clientX - startX;
                           const deltaY = moveEvent.clientY - startY;
-                          
-                          setImages(prevImages => prevImages.map(img =>
-                            img.id === image.id
-                              ? { ...img, x: startPosX + deltaX, y: startPosY + deltaY }
-                              : img
-                          ));
+                          setImages(prevImages => prevImages.map(img => {
+                            if (img.id !== image.id) return img
+                            const pos = dragWithPageTransfer(startEl, deltaX, deltaY, capBookOpen, capSpreadIdx)
+                            return { ...img, pageIndex: pos.pageIndex, x: pos.x, y: pos.y }
+                          }));
                         };
 
                         const handleMouseUp = () => {
@@ -3313,11 +3429,14 @@ function Note() {
                       setIsDragging(false);
                     }}
                     onResizeStop={(e, direction, ref, d) => {
-                      setStickers(prevStickers => prevStickers.map(s =>
-                        s.id === sticker.id
-                          ? { ...s, width: s.width + d.width, height: s.height + d.height }
-                          : s
-                      ));
+                      setStickers(prevStickers => prevStickers.map(s => {
+                        if (s.id !== sticker.id) return s
+                        const n = normPaged(s)
+                        const nw = Math.max(10, n.width + d.width)
+                        const nh = Math.max(10, n.height + d.height)
+                        const c = clampInPage(n, n.x, n.y, nw, nh)
+                        return { ...n, x: c.x, y: c.y, width: nw, height: nh }
+                      }));
                       setIsResizing(false);
                       setTimeout(() => saveToHistory(), 50)
                     }}
@@ -3384,8 +3503,7 @@ function Note() {
                         
                         const startX = e.clientX;
                         const startY = e.clientY;
-                        const startPosX = sticker.x;
-                        const startPosY = sticker.y;
+                        const startEl = { ...sticker }; const capBookOpen = isBookOpen; const capSpreadIdx = spreadIndex;
                         const dragRot = sticker.rotation ?? 0;
                         let hasMoved = false;
                         const dragDelta = { dx: 0, dy: 0 };
@@ -3429,11 +3547,11 @@ function Note() {
                           cleanup?.()
                           if (hasMoved) {
                             skipPersistDuringCanvasDragRef.current = false
-                            setStickers(prevStickers => prevStickers.map(s =>
-                              s.id === sid
-                                ? { ...s, x: startPosX + dx, y: startPosY + dy }
-                                : s
-                            ))
+                            setStickers(prevStickers => prevStickers.map(s => {
+                              if (s.id !== sid) return s
+                              const pos = dragWithPageTransfer(startEl, dx, dy, capBookOpen, capSpreadIdx)
+                              return { ...s, pageIndex: pos.pageIndex, x: pos.x, y: pos.y }
+                            }))
                             requestAnimationFrame(() => flushPersistFromSnapshot())
                             setTimeout(() => saveToHistory(), 50)
                           }
@@ -3541,11 +3659,12 @@ function Note() {
                   const scale = (nw / s.startW + nh / s.startH) / 2
                   const nfs = clampTextBoxFontSize(Math.round(s.startFs * scale))
                   setTextBoxes((prevTextBoxes) =>
-                    prevTextBoxes.map((tb) =>
-                      tb.id === textBox.id
-                        ? { ...tb, width: nw, height: nh, fontSize: nfs }
-                        : tb
-                    )
+                    prevTextBoxes.map((tb) => {
+                      if (tb.id !== textBox.id) return tb
+                      const n = normPaged(tb)
+                      const c = clampInPage(n, n.x, n.y, nw, nh)
+                      return { ...n, x: c.x, y: c.y, width: nw, height: nh, fontSize: nfs }
+                    })
                   )
                 }}
                 onResizeStop={() => {
@@ -3639,31 +3758,20 @@ function Note() {
                     
                     const startX = e.clientX;
                     const startY = e.clientY;
-                    const startPosX = textBox.x;
-                    const startPosY = textBox.y;
+                    const startEl = { ...textBox }; const capBookOpen = isBookOpen; const capSpreadIdx = spreadIndex;
                     let hasMoved = false;
 
                     const mouseMoveHandler = (moveEvent) => {
-                      // Don't drag if context menu is open or right click detected
-                      if (isContextMenuOpen || isRightClickRef.current) {
-                        stopAllDragging();
-                        return;
-                      }
-                      
-                      if (!hasMoved) {
-                        setIsDragging(true);
-                        hasMoved = true;
-                        skipPersistDuringCanvasDragRef.current = true;
-                      }
+                      if (isContextMenuOpen || isRightClickRef.current) { stopAllDragging(); return; }
+                      if (!hasMoved) { setIsDragging(true); hasMoved = true; skipPersistDuringCanvasDragRef.current = true; }
                       moveEvent.preventDefault();
                       const deltaX = moveEvent.clientX - startX;
                       const deltaY = moveEvent.clientY - startY;
-                      
-                      setTextBoxes(prevTextBoxes => prevTextBoxes.map(tb =>
-                        tb.id === textBox.id
-                          ? { ...tb, x: startPosX + deltaX, y: startPosY + deltaY }
-                          : tb
-                      ));
+                      setTextBoxes(prevTextBoxes => prevTextBoxes.map(tb => {
+                        if (tb.id !== textBox.id) return tb
+                        const pos = dragWithPageTransfer(startEl, deltaX, deltaY, capBookOpen, capSpreadIdx)
+                        return { ...tb, pageIndex: pos.pageIndex, x: pos.x, y: pos.y }
+                      }));
                     };
 
                     const mouseUpHandler = () => {
@@ -3730,26 +3838,20 @@ function Note() {
                     const touch = e.touches[0];
                     const startX = touch.clientX;
                     const startY = touch.clientY;
-                    const startPosX = textBox.x;
-                    const startPosY = textBox.y;
+                    const startElT = { ...textBox }; const capBookOpenT = isBookOpen; const capSpreadIdxT = spreadIndex;
                     let hasMoved = false;
 
                     const handleTouchMove = (moveEvent) => {
-                      if (!hasMoved) {
-                        setIsDragging(true);
-                        hasMoved = true;
-                        skipPersistDuringCanvasDragRef.current = true;
-                      }
+                      if (!hasMoved) { setIsDragging(true); hasMoved = true; skipPersistDuringCanvasDragRef.current = true; }
                       moveEvent.preventDefault();
-                      const touch = moveEvent.touches[0];
-                      const deltaX = touch.clientX - startX;
-                      const deltaY = touch.clientY - startY;
-                      
-                      setTextBoxes(prevTextBoxes => prevTextBoxes.map(tb =>
-                        tb.id === textBox.id
-                          ? { ...tb, x: startPosX + deltaX, y: startPosY + deltaY }
-                          : tb
-                      ));
+                      const tc = moveEvent.touches[0];
+                      const deltaX = tc.clientX - startX;
+                      const deltaY = tc.clientY - startY;
+                      setTextBoxes(prevTextBoxes => prevTextBoxes.map(tb => {
+                        if (tb.id !== textBox.id) return tb
+                        const pos = dragWithPageTransfer(startElT, deltaX, deltaY, capBookOpenT, capSpreadIdxT)
+                        return { ...tb, pageIndex: pos.pageIndex, x: pos.x, y: pos.y }
+                      }));
                     };
 
                     const handleTouchEnd = () => {
@@ -3791,6 +3893,8 @@ function Note() {
                       skipPersistDuringCanvasDragRef={skipPersistDuringCanvasDragRef}
                       flushPersistFromSnapshot={flushPersistFromSnapshot}
                       handleContextMenu={handleContextMenu}
+                      isBookOpen={isBookOpen}
+                      spreadIndex={spreadIndex}
                     />
                     {isSelected && (
                       <>
@@ -3840,8 +3944,145 @@ function Note() {
                 </div>
               </Resizable>
             );
-          })}
-        </div>
+                  })}
+                </div>)}
+              )}
+            </div>
+            </div>
+          </div>
+        ) : (
+          /* Non-book mode: same per-page approach, just no clipping, abs positioned */
+          <div className="note-content" style={{ position: 'relative', minHeight: totalPages * 0 + PAGE_H }}>
+            {Array.from({ length: totalPages }, (_, pi) => (
+              <div key={pi} style={{ position: 'absolute', left: pi * PAGE_W, top: 0, width: PAGE_W, height: PAGE_H, overflow: 'visible' }}>
+                {allSortedElements.filter(el => (el.pageIndex ?? 0) === pi).map((element) => {
+                  if (element.elementType === 'shape') {
+                    const shape = element; const isSelected = selectedItem?.type === 'shape' && selectedItem.id === shape.id;
+                    return renderShape(shape, isSelected);
+                  } else if (element.elementType === 'image') {
+                    const image = element; const isSelected = selectedItem?.type === 'image' && selectedItem.id === image.id;
+                    return (
+                      <Resizable key={image.id} size={{ width: image.width, height: image.height }}
+                        onResizeStart={() => { setIsResizing(true); setIsDragging(false); }}
+                        onResizeStop={(e, direction, ref, d) => {
+                          setImages(prevImages => prevImages.map(img => {
+                            if (img.id !== image.id) return img
+                            const n = normPaged(img); const nw = Math.max(10, n.width + d.width); const nh = Math.max(10, n.height + d.height);
+                            const c = clampInPage(n, n.x, n.y, nw, nh); return { ...n, x: c.x, y: c.y, width: nw, height: nh }
+                          })); setIsResizing(false); setTimeout(() => saveToHistory(), 50)
+                        }}
+                        className={`note-image-wrapper ${isSelected ? 'selected' : ''}`}
+                        style={{ position: 'absolute', left: image.x, top: image.y, zIndex: image.zIndex || 1, transform: `rotate(${image.rotation ?? 0}deg)`, transformOrigin: 'center center' }}
+                        enable={{ top:true, right:true, bottom:true, left:true, topRight:true, bottomRight:true, bottomLeft:true, topLeft:true }}
+                      >
+                        <div className="note-image-container"
+                          onMouseDown={(e) => {
+                            if (isContextMenuOpen || e.target.closest('.react-resizable-handle') || e.target.closest('.note-delete-btn') || e.target.closest('.note-rotate-handle')) return;
+                            e.stopPropagation(); stopAllDragging(); handleSelectItem({ type: 'image', id: image.id });
+                            const startX = e.clientX; const startY = e.clientY;
+                            const startEl = { ...image }; const capBookOpen = isBookOpen; const capSpreadIdx = spreadIndex;
+                            let hasMoved = false;
+                            const handleMouseMove = (moveEvent) => {
+                              if (isContextMenuOpen) { stopAllDragging(); return; }
+                              if (!hasMoved) { setIsDragging(true); hasMoved = true; skipPersistDuringCanvasDragRef.current = true; }
+                              moveEvent.preventDefault(); const deltaX = moveEvent.clientX - startX; const deltaY = moveEvent.clientY - startY;
+                              setImages(prevImages => prevImages.map(img => {
+                                if (img.id !== image.id) return img; const pos = dragWithPageTransfer(startEl, deltaX, deltaY, capBookOpen, capSpreadIdx); return { ...img, pageIndex: pos.pageIndex, x: pos.x, y: pos.y }
+                              }));
+                            };
+                            const handleMouseUp = () => {
+                              setIsDragging(false);
+                              document.removeEventListener('mousemove', handleMouseMove); document.removeEventListener('mouseup', handleMouseUp);
+                              if (hasMoved) { skipPersistDuringCanvasDragRef.current = false; requestAnimationFrame(() => flushPersistFromSnapshot()); setTimeout(() => saveToHistory(), 50); }
+                            };
+                            document.addEventListener('mousemove', handleMouseMove); document.addEventListener('mouseup', handleMouseUp);
+                          }}
+                        >
+                          <img src={image.src} alt="Uploaded" className="note-image" style={{ width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }} />
+                        </div>
+                        {isSelected && (<>
+                          <button type="button" className="note-rotate-handle" aria-label="Rotate"
+                            onMouseDown={(e) => startRotateDrag(e, { x: image.x, y: image.y, w: image.width, h: image.height }, image.rotation, (deg) => setImages(prev => prev.map(img => img.id === image.id ? { ...img, rotation: deg } : img)))}
+                          ><RotateCw size={14} /></button>
+                          <button className="note-delete-btn" onClick={() => deleteImage(image.id)} style={{ top: '-12px', left: '-12px' }}><Trash2 size={16} /></button>
+                        </>)}
+                      </Resizable>
+                    );
+                  } else if (element.elementType === 'sticker') {
+                    const sticker = element; const isSelected = selectedItem?.type === 'sticker' && selectedItem.id === sticker.id; const sid = sticker.id;
+                    return (
+                      <div key={sid} className="note-sticker-host" style={{ position: 'absolute', left: sticker.x, top: sticker.y, zIndex: sticker.zIndex || 1, width: sticker.width, height: sticker.height, transform: `rotate(${sticker.rotation ?? 0}deg)`, transformOrigin: 'center center' }}>
+                        <Resizable size={{ width: sticker.width, height: sticker.height }}
+                          onResizeStart={() => { setIsResizing(true); setIsDragging(false); }}
+                          onResizeStop={(e, direction, ref, d) => {
+                            setStickers(prevStickers => prevStickers.map(s => {
+                              if (s.id !== sticker.id) return s; const n = normPaged(s); const nw = Math.max(10, n.width + d.width); const nh = Math.max(10, n.height + d.height);
+                              const c = clampInPage(n, n.x, n.y, nw, nh); return { ...n, x: c.x, y: c.y, width: nw, height: nh }
+                            })); setIsResizing(false); setTimeout(() => saveToHistory(), 50)
+                          }}
+                          className={`note-sticker-wrapper ${isSelected ? 'selected' : ''}`} style={{ position: 'relative', left: 0, top: 0 }}
+                          enable={{ top:true, right:true, bottom:true, left:true, topRight:true, bottomRight:true, bottomLeft:true, topLeft:true }}
+                        >
+                          <div className="note-sticker-container"
+                            onMouseDown={(e) => {
+                              if (isContextMenuOpen || e.target.closest('.react-resizable-handle') || e.target.closest('.note-delete-btn') || e.target.closest('.note-rotate-handle')) return;
+                              e.stopPropagation(); e.preventDefault(); handleSelectItem({ type: 'sticker', id: sticker.id });
+                              const startX = e.clientX; const startY = e.clientY;
+                              const startEl = { ...sticker }; const capBookOpen = isBookOpen; const capSpreadIdx = spreadIndex;
+                              let hasMoved = false;
+                              const handleUp = () => {
+                                setIsDragging(false); document.removeEventListener('mousemove', handleMove); document.removeEventListener('mouseup', handleUp);
+                                if (hasMoved) { skipPersistDuringCanvasDragRef.current = false; setStickers(prev => prev.map(s => { if (s.id !== sid) return s; const pos = dragWithPageTransfer(startEl, 0, 0, capBookOpen, capSpreadIdx); return { ...s, pageIndex: pos.pageIndex, x: pos.x, y: pos.y }; })); requestAnimationFrame(() => flushPersistFromSnapshot()); setTimeout(() => saveToHistory(), 50); }
+                              };
+                              const handleMove = (mv) => {
+                                if (!hasMoved) { hasMoved = true; skipPersistDuringCanvasDragRef.current = true; } mv.preventDefault();
+                                const dx = mv.clientX - startX; const dy = mv.clientY - startY;
+                                setStickers(prev => prev.map(s => { if (s.id !== sid) return s; const pos = dragWithPageTransfer(startEl, dx, dy, capBookOpen, capSpreadIdx); return { ...s, pageIndex: pos.pageIndex, x: pos.x, y: pos.y }; }));
+                              };
+                              document.addEventListener('mousemove', handleMove); document.addEventListener('mouseup', handleUp);
+                            }}
+                          >
+                            <img src={sticker.src} alt="Sticker" className="note-sticker" style={{ width: '100%', height: '100%', objectFit: 'contain', pointerEvents: 'none' }} />
+                          </div>
+                          {isSelected && (<>
+                            <button type="button" className="note-rotate-handle" aria-label="Rotate"
+                              onMouseDown={(e) => startRotateDrag(e, { x: sticker.x, y: sticker.y, w: sticker.width, h: sticker.height }, sticker.rotation, (deg) => setStickers(prev => prev.map(s => s.id === sid ? { ...s, rotation: deg } : s)))}
+                            ><RotateCw size={14} /></button>
+                            <button className="note-delete-btn" onClick={() => deleteSticker(sticker.id)} style={{ top: '-12px', left: '-12px' }}><Trash2 size={16} /></button>
+                          </>)}
+                        </Resizable>
+                      </div>
+                    );
+                  } else {
+                    const textBox = element; const isSelected = selectedItem?.type === 'textbox' && selectedItem.id === textBox.id;
+                    const isPostit = textBox.variant === 'postit'; const postitBg = textBox.postitColor || '#FEEF9F'; const postitFg = textBox.postitTextColor || '#2d2a26';
+                    return (
+                      <Resizable key={textBox.id} minWidth={48} minHeight={32} size={{ width: textBox.width, height: textBox.height }}
+                        onResizeStart={() => { setIsResizing(true); setIsDragging(false); skipPersistDuringCanvasDragRef.current = true; }}
+                        onResizeStop={() => { setIsResizing(false); skipPersistDuringCanvasDragRef.current = false; requestAnimationFrame(() => flushPersistFromSnapshot()); setTimeout(() => saveToHistory(), 50); }}
+                        className={`note-textbox-wrapper ${isSelected ? 'selected' : ''}${isPostit ? ' note-textbox-wrapper--postit' : ''}`}
+                        style={{ position: 'absolute', left: textBox.x, top: textBox.y, zIndex: textBox.zIndex || 1, transform: `rotate(${textBox.rotation ?? 0}deg)`, transformOrigin: 'center center' }}
+                        enable={{ topRight:true, bottomRight:true, bottomLeft:true, topLeft:true }}
+                      >
+                        <div className="note-textbox-container" style={{ position: 'relative' }}
+                          onMouseDown={(e) => { if (e.button === 2 || isContextMenuOpen) return; handleSelectItem({ type: 'textbox', id: textBox.id }); }}
+                        >
+                          <div className={`note-textbox${isPostit ? ' note-textbox--postit' : ''}`} style={isPostit ? { backgroundColor: postitBg, color: postitFg } : {}} />
+                          {isSelected && (<>
+                            <button type="button" className="note-rotate-handle" aria-label="Rotate"
+                              onMouseDown={(e) => startRotateDrag(e, { x: textBox.x, y: textBox.y, w: textBox.width, h: textBox.height }, textBox.rotation, (deg) => setTextBoxes(prev => prev.map(tb => tb.id === textBox.id ? { ...tb, rotation: deg } : tb)))}
+                            ><RotateCw size={14} /></button>
+                            <button className="note-delete-btn" onClick={() => deleteTextBox(textBox.id)} style={{ top: '-12px', left: '-12px' }}><Trash2 size={16} /></button>
+                          </>)}
+                        </div>
+                      </Resizable>
+                    );
+                  }
+                })}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {textToolbar && (
@@ -4082,6 +4323,72 @@ function Note() {
               )}
             </>
           )}
+        </div>
+      )}
+
+      {/* Hidden div สำหรับ PDF export — render ทีละหน้า */}
+      {exportPageIndex !== null && (
+        <div
+          ref={exportPageRef}
+          className="note-export-page"
+          style={{ position: 'fixed', left: -9999, top: -9999, zIndex: -1 }}
+        >
+          {allSortedElements
+            .filter(el => (el.pageIndex ?? 0) === exportPageIndex)
+            .map(el => {
+              const style = {
+                position: 'absolute',
+                left: el.x,
+                top: el.y,
+                width: el.width,
+                height: el.height,
+                transform: `rotate(${el.rotation ?? 0}deg)`,
+                transformOrigin: 'center center',
+                zIndex: el.zIndex || 1
+              }
+              if (el.elementType === 'image') {
+                return <img key={el.id} src={el.src} alt="" style={{ ...style, objectFit: 'cover' }} />
+              }
+              if (el.elementType === 'sticker') {
+                return <img key={el.id} src={el.src} alt="" style={{ ...style, objectFit: 'contain' }} />
+              }
+              if (el.elementType === 'shape') {
+                let inner = null
+                if (el.type === 'rectangle') {
+                  inner = <div style={{ width:'100%', height:'100%', backgroundColor: el.fillColor, border: `${el.strokeWidth}px solid ${el.strokeColor}` }} />
+                } else if (el.type === 'circle') {
+                  inner = <div style={{ width:'100%', height:'100%', backgroundColor: el.fillColor, borderRadius: '50%', border: `${el.strokeWidth}px solid ${el.strokeColor}` }} />
+                } else if (el.type === 'triangle') {
+                  inner = <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none"><polygon points="50,10 90,90 10,90" fill={el.fillColor} stroke={el.strokeColor} strokeWidth={el.strokeWidth} /></svg>
+                } else if (el.type === 'line') {
+                  inner = <div style={{ width:'100%', height: el.strokeWidth, backgroundColor: el.strokeColor }} />
+                } else {
+                  inner = <div style={{ width:'100%', height:'100%', backgroundColor: el.fillColor, border: `${el.strokeWidth}px solid ${el.strokeColor}` }} />
+                }
+                return <div key={el.id} style={style}>{inner}</div>
+              }
+              // textbox
+              const isPostit = el.variant === 'postit'
+              const bg = isPostit ? (el.postitColor || '#FEEF9F') : 'transparent'
+              const fg = isPostit ? (el.postitTextColor || '#2d2a26') : '#3A3030'
+              return (
+                <div
+                  key={el.id}
+                  style={{
+                    ...style,
+                    background: bg,
+                    color: fg,
+                    fontSize: el.fontSize || 14,
+                    fontFamily: 'inherit',
+                    padding: '8px',
+                    boxSizing: 'border-box',
+                    overflow: 'hidden',
+                    wordBreak: 'break-word'
+                  }}
+                  dangerouslySetInnerHTML={{ __html: el.content || '' }}
+                />
+              )
+            })}
         </div>
       )}
     </div>
