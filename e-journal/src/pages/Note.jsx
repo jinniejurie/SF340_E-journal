@@ -1,5 +1,4 @@
 import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react'
-import html2canvas from 'html2canvas'
 import { jsPDF } from 'jspdf'
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import { Resizable } from 're-resizable'
@@ -2265,36 +2264,270 @@ function Note() {
     setShapes(shapes.map(s => s.id === id ? { ...s, strokeWidth } : s));
   };
 
-  const exportPageRef = useRef(null)
   const [isExportingPdf, setIsExportingPdf] = useState(false)
-  const [exportPageIndex, setExportPageIndex] = useState(null)
+
+  // ---- PDF Export: direct canvas drawing (pixel-perfect WYSIWYG) ----
+
+  /**
+   * Load any image src → HTMLImageElement without tainting the canvas.
+   * - data:/blob: URLs → load directly (no crossOrigin needed)
+   * - HTTP URLs     → fetch() → blob URL (same-origin, never taints canvas)
+   */
+  const loadImageEl = (src) => {
+    if (!src) return Promise.resolve(null)
+
+    const fromUrl = (url) => new Promise((res) => {
+      const img = new Image()
+      img.onload = () => res(img)
+      img.onerror = () => res(null)
+      img.src = url
+    })
+
+    if (src.startsWith('data:') || src.startsWith('blob:')) {
+      return fromUrl(src)
+    }
+
+    return fetch(src)
+      .then(r => r.blob())
+      .then(blob => {
+        const blobUrl = URL.createObjectURL(blob)
+        return fromUrl(blobUrl).then(img => {
+          URL.revokeObjectURL(blobUrl)
+          return img
+        })
+      })
+      .catch(() => fromUrl(src))
+  }
+
+  /** Draw a shape onto ctx at origin (0,0) — caller must translate first */
+  const drawShapeToCtx = (ctx, el) => {
+    const { width: w, height: h } = el
+    const sw = el.strokeWidth || 1
+    ctx.fillStyle = el.fillColor || 'transparent'
+    ctx.strokeStyle = el.strokeColor || '#000000'
+    ctx.lineWidth = sw
+    if (el.type === 'rectangle') {
+      if (el.fillColor && el.fillColor !== 'transparent') ctx.fillRect(0, 0, w, h)
+      ctx.strokeRect(sw / 2, sw / 2, w - sw, h - sw)
+    } else if (el.type === 'circle') {
+      ctx.beginPath()
+      ctx.ellipse(w / 2, h / 2, Math.max(1, w / 2 - sw / 2), Math.max(1, h / 2 - sw / 2), 0, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.stroke()
+    } else if (el.type === 'triangle') {
+      ctx.beginPath()
+      ctx.moveTo(w * 0.5, h * 0.1)
+      ctx.lineTo(w * 0.9, h * 0.9)
+      ctx.lineTo(w * 0.1, h * 0.9)
+      ctx.closePath()
+      ctx.fill()
+      ctx.stroke()
+    } else if (el.type === 'star') {
+      const pts = [[50,10],[61,35],[88,35],[66,52],[74,78],[50,62],[26,78],[34,52],[12,35],[39,35]]
+      ctx.beginPath()
+      pts.forEach(([px, py], i) => {
+        const nx = (px / 100) * w
+        const ny = (py / 100) * h
+        if (i === 0) ctx.moveTo(nx, ny); else ctx.lineTo(nx, ny)
+      })
+      ctx.closePath()
+      ctx.fill()
+      ctx.stroke()
+    } else if (el.type === 'line') {
+      // render as filled rectangle to match CSS border rendering
+      ctx.fillStyle = el.strokeColor || '#000000'
+      ctx.fillRect(0, (h - sw) / 2, w, sw)
+    }
+  }
+
+  /**
+   * Draw a textbox (rich HTML content) directly onto ctx at origin (0,0).
+   * Parses HTML DOM to extract text with bold/italic/color/highlight/strikethrough,
+   * then renders with Canvas 2D text API — never taints the canvas.
+   */
+  const drawTextBoxToCtx = (ctx, el) => {
+    const isPostit = el.variant === 'postit'
+    const bg     = isPostit ? (el.postitColor     || '#FEEF9F') : null
+    const fg     = isPostit ? (el.postitTextColor || '#2d2a26') : '#3A3030'
+    const fs     = el.fontSize || 14
+    const pad    = 8
+    const lineH  = Math.round(fs * 1.4)
+
+    if (bg) { ctx.fillStyle = bg; ctx.fillRect(0, 0, el.width, el.height) }
+
+    // --- parse HTML → flat segment list ---
+    const segs = []
+    const parseNode = (node, st) => {
+      if (node.nodeType === 3) {
+        if (node.textContent) segs.push({ text: node.textContent, ...st })
+        return
+      }
+      if (node.nodeType !== 1) return
+      const tag = node.tagName.toLowerCase()
+      const ns  = { ...st }
+      if (tag === 'br')  { segs.push({ text: '\n', ...st }); return }
+      if (tag === 'strong' || tag === 'b')              ns.bold   = true
+      if (tag === 'em'     || tag === 'i')              ns.italic = true
+      if (tag === 's' || tag === 'del' || tag === 'strike') ns.strike = true
+      const style = node.getAttribute?.('style') || ''
+      const mc = style.match(/\bcolor\s*:\s*([^;]+)/)
+      const mh = style.match(/background(?:-color)?\s*:\s*([^;]+)/)
+      if (mc) ns.color = mc[1].trim()
+      if (mh) ns.hl    = mh[1].trim()
+      const isBlock = /^(p|div|li|h[1-6]|blockquote)$/.test(tag)
+      if (isBlock && segs.length > 0 && segs[segs.length - 1]?.text !== '\n')
+        segs.push({ text: '\n', ...st })
+      node.childNodes.forEach(c => parseNode(c, ns))
+      if (isBlock) segs.push({ text: '\n', ...st })
+    }
+    const tmp = document.createElement('div')
+    tmp.innerHTML = el.content || ''
+    tmp.childNodes.forEach(c => parseNode(c, {}))
+
+    // --- render segments with word-wrap ---
+    let cx = pad
+    let cy = pad + fs
+    ctx.textBaseline = 'alphabetic'
+
+    for (const seg of segs) {
+      if (seg.text === '\n') {
+        cx = pad; cy += lineH
+        if (cy > el.height) break
+        continue
+      }
+      ctx.font = `${seg.italic ? 'italic ' : ''}${seg.bold ? 'bold ' : ''}${fs}px sans-serif`
+      const tokens = seg.text.split(/(\s+)/)
+      for (const tok of tokens) {
+        if (!tok) continue
+        const tw = ctx.measureText(tok).width
+        if (cx + tw > el.width - pad && cx > pad) {
+          cx = pad; cy += lineH
+          if (cy > el.height) return
+          if (/^\s+$/.test(tok)) continue
+        }
+        if (seg.hl && seg.hl !== 'transparent') {
+          ctx.save(); ctx.fillStyle = seg.hl
+          ctx.fillRect(cx, cy - fs * 0.85, tw, lineH * 0.95)
+          ctx.restore()
+        }
+        ctx.fillStyle = seg.color || fg
+        ctx.fillText(tok, cx, cy)
+        if (seg.strike) {
+          ctx.save(); ctx.fillStyle = seg.color || fg
+          ctx.fillRect(cx, cy - fs * 0.35, tw, 1)
+          ctx.restore()
+        }
+        cx += tw
+      }
+    }
+  }
 
   const downloadAsPDF = async () => {
     if (isExportingPdf) return
     setIsExportingPdf(true)
-    try {
-      const pdf = new jsPDF({ orientation: 'portrait', unit: 'px', format: [PAGE_W, PAGE_H] })
-      for (let pi = 0; pi < totalPages; pi++) {
-        setExportPageIndex(pi)
-        await new Promise(r => setTimeout(r, 120))
-        if (!exportPageRef.current) continue
-        const canvas = await html2canvas(exportPageRef.current, {
-          scale: 2,
-          useCORS: true,
-          backgroundColor: '#f8f3e8'
-        })
-        const imgData = canvas.toDataURL('image/jpeg', 0.92)
-        if (pi > 0) pdf.addPage()
-        pdf.addImage(imgData, 'JPEG', 0, 0, PAGE_W, PAGE_H)
+
+    /** Draw one element onto ctx; caller must translate/rotate first */
+    const drawEl = async (ctx, el) => {
+      if (el.elementType === 'image' || el.elementType === 'sticker') {
+        const img = await loadImageEl(el.src)
+        if (!img) return
+        if (el.elementType === 'sticker') {
+          // objectFit: contain — preserve aspect ratio, centre inside box
+          const nw = img.naturalWidth  || el.width
+          const nh = img.naturalHeight || el.height
+          const scale = Math.min(el.width / nw, el.height / nh)
+          const dw = nw * scale
+          const dh = nh * scale
+          ctx.drawImage(img, (el.width - dw) / 2, (el.height - dh) / 2, dw, dh)
+        } else {
+          // objectFit: cover (user-uploaded photos fill the box)
+          ctx.drawImage(img, 0, 0, el.width, el.height)
+        }
+      } else if (el.elementType === 'shape') {
+        drawShapeToCtx(ctx, el)
+      } else {
+        drawTextBoxToCtx(ctx, el)
       }
-      pdf.save(`${title || 'note'}.pdf`)
+    }
+
+    /** Place a set of elements onto ctx; offsetX = left-edge of their "page" in ctx space */
+    const drawPageEls = async (ctx, els, offsetX = 0) => {
+      for (const el of els) {
+        ctx.save()
+        ctx.translate(offsetX + el.x + el.width / 2, el.y + el.height / 2)
+        ctx.rotate(((el.rotation ?? 0) * Math.PI) / 180)
+        ctx.translate(-el.width / 2, -el.height / 2)
+        await drawEl(ctx, el)
+        ctx.restore()
+      }
+    }
+
+    try {
+      if (isBookOpen) {
+        // ── Book mode: export each SPREAD (2 pages side-by-side) as one PDF page ──
+        // This matches exactly what the user sees: 1120 × 794
+        const SPREAD_W = PAGE_W * 2
+        const pdf = new jsPDF({ orientation: 'landscape', unit: 'px', format: [SPREAD_W, PAGE_H] })
+        const numSpreads = Math.ceil(totalPages / 2)
+
+        for (let si = 0; si < numSpreads; si++) {
+          if (si > 0) pdf.addPage()
+
+          const canvas = document.createElement('canvas')
+          canvas.width  = SPREAD_W * 2   // 2× for crisp quality
+          canvas.height = PAGE_H * 2
+          const ctx = canvas.getContext('2d')
+          ctx.scale(2, 2)
+
+          // Spread background
+          ctx.fillStyle = '#f8f3e8'
+          ctx.fillRect(0, 0, SPREAD_W, PAGE_H)
+
+             // Left page (pageIndex = si*2)
+          const leftEls  = allSortedElements.filter(el => (el.pageIndex ?? 0) === si * 2)
+          await drawPageEls(ctx, leftEls, 0)
+
+          // Right page (pageIndex = si*2 + 1), offset by PAGE_W
+          const rightEls = allSortedElements.filter(el => (el.pageIndex ?? 0) === si * 2 + 1)
+          await drawPageEls(ctx, rightEls, PAGE_W)
+
+          const imgData = canvas.toDataURL('image/jpeg', 0.92)
+          pdf.addImage(imgData, 'JPEG', 0, 0, SPREAD_W, PAGE_H)
+        }
+
+        pdf.save(`${title || 'note'}.pdf`)
+      } else {
+        // ── Normal mode: one PDF page per note page ──
+        const pdf = new jsPDF({ orientation: 'portrait', unit: 'px', format: [PAGE_W, PAGE_H] })
+
+        for (let pi = 0; pi < totalPages; pi++) {
+          if (pi > 0) pdf.addPage()
+
+          const canvas = document.createElement('canvas')
+          canvas.width  = PAGE_W * 2
+          canvas.height = PAGE_H * 2
+          const ctx = canvas.getContext('2d')
+          ctx.scale(2, 2)
+
+          ctx.fillStyle = '#f8f3e8'
+          ctx.fillRect(0, 0, PAGE_W, PAGE_H)
+
+          const pageEls = allSortedElements.filter(el => (el.pageIndex ?? 0) === pi)
+          await drawPageEls(ctx, pageEls, 0)
+
+          const imgData = canvas.toDataURL('image/jpeg', 0.92)
+          pdf.addImage(imgData, 'JPEG', 0, 0, PAGE_W, PAGE_H)
+        }
+
+        pdf.save(`${title || 'note'}.pdf`)
+      }
     } catch (err) {
       console.error('PDF export error:', err)
+      alert(`Export failed: ${err?.message || err}`)
     } finally {
       setIsExportingPdf(false)
-      setExportPageIndex(null)
     }
-  };
+  }
 
   const shareAsLink = () => {
     const link = window.location.href;
@@ -3141,7 +3374,9 @@ function Note() {
             {showShareMenu && (
               <div className="note-dropdown-menu">
                 <button type="button" onClick={shareAsLink}><Copy size={16} /> Copy Link</button>
-                <button type="button" onClick={downloadAsPDF}><Download size={16} /> Download PDF</button>
+                <button type="button" onClick={downloadAsPDF} disabled={isExportingPdf}>
+                  <Download size={16} /> {isExportingPdf ? 'Exporting…' : 'Download PDF'}
+                </button>
               </div>
             )}
           </div>
@@ -4326,71 +4561,6 @@ function Note() {
         </div>
       )}
 
-      {/* Hidden div สำหรับ PDF export — render ทีละหน้า */}
-      {exportPageIndex !== null && (
-        <div
-          ref={exportPageRef}
-          className="note-export-page"
-          style={{ position: 'fixed', left: -9999, top: -9999, zIndex: -1 }}
-        >
-          {allSortedElements
-            .filter(el => (el.pageIndex ?? 0) === exportPageIndex)
-            .map(el => {
-              const style = {
-                position: 'absolute',
-                left: el.x,
-                top: el.y,
-                width: el.width,
-                height: el.height,
-                transform: `rotate(${el.rotation ?? 0}deg)`,
-                transformOrigin: 'center center',
-                zIndex: el.zIndex || 1
-              }
-              if (el.elementType === 'image') {
-                return <img key={el.id} src={el.src} alt="" style={{ ...style, objectFit: 'cover' }} />
-              }
-              if (el.elementType === 'sticker') {
-                return <img key={el.id} src={el.src} alt="" style={{ ...style, objectFit: 'contain' }} />
-              }
-              if (el.elementType === 'shape') {
-                let inner = null
-                if (el.type === 'rectangle') {
-                  inner = <div style={{ width:'100%', height:'100%', backgroundColor: el.fillColor, border: `${el.strokeWidth}px solid ${el.strokeColor}` }} />
-                } else if (el.type === 'circle') {
-                  inner = <div style={{ width:'100%', height:'100%', backgroundColor: el.fillColor, borderRadius: '50%', border: `${el.strokeWidth}px solid ${el.strokeColor}` }} />
-                } else if (el.type === 'triangle') {
-                  inner = <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none"><polygon points="50,10 90,90 10,90" fill={el.fillColor} stroke={el.strokeColor} strokeWidth={el.strokeWidth} /></svg>
-                } else if (el.type === 'line') {
-                  inner = <div style={{ width:'100%', height: el.strokeWidth, backgroundColor: el.strokeColor }} />
-                } else {
-                  inner = <div style={{ width:'100%', height:'100%', backgroundColor: el.fillColor, border: `${el.strokeWidth}px solid ${el.strokeColor}` }} />
-                }
-                return <div key={el.id} style={style}>{inner}</div>
-              }
-              // textbox
-              const isPostit = el.variant === 'postit'
-              const bg = isPostit ? (el.postitColor || '#FEEF9F') : 'transparent'
-              const fg = isPostit ? (el.postitTextColor || '#2d2a26') : '#3A3030'
-              return (
-                <div
-                  key={el.id}
-                  style={{
-                    ...style,
-                    background: bg,
-                    color: fg,
-                    fontSize: el.fontSize || 14,
-                    fontFamily: 'inherit',
-                    padding: '8px',
-                    boxSizing: 'border-box',
-                    overflow: 'hidden',
-                    wordBreak: 'break-word'
-                  }}
-                  dangerouslySetInnerHTML={{ __html: el.content || '' }}
-                />
-              )
-            })}
-        </div>
-      )}
     </div>
   )
 }
