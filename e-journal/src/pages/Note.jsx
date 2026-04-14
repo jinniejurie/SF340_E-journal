@@ -1068,12 +1068,23 @@ function Note() {
   }
 
   const goToNextSpread = useCallback(() => {
-    setSpreadIndex((prev) => prev + 1)
+    if (pageTurnInProgress.current) return
+    pageTurnInProgress.current = true
+    setTurningPage(true)
+    setTimeout(() => setSpreadIndex((prev) => prev + 1), 150)
+    setTimeout(() => { setTurningPage(false); pageTurnInProgress.current = false }, 300)
   }, [])
 
   const goToPrevSpread = useCallback(() => {
-    setSpreadIndex((prev) => Math.max(0, prev - 1))
+    if (pageTurnInProgress.current) return
+    pageTurnInProgress.current = true
+    setTurningPage(true)
+    setTimeout(() => setSpreadIndex((prev) => Math.max(0, prev - 1)), 150)
+    setTimeout(() => { setTurningPage(false); pageTurnInProgress.current = false }, 300)
   }, [])
+
+  const [showExportModal, setShowExportModal] = useState(false)
+  const [exportSpreads, setExportSpreads] = useState(null) // null = all; Set<number> = selected spread indices
 
   persistSnapshotRef.current = {
     storageKey,
@@ -2265,6 +2276,9 @@ function Note() {
   };
 
   const [isExportingPdf, setIsExportingPdf] = useState(false)
+  const [linkCopied, setLinkCopied] = useState(false)
+  const [turningPage, setTurningPage] = useState(false)
+  const pageTurnInProgress = useRef(false)
 
   // ---- PDF Export: direct canvas drawing (pixel-perfect WYSIWYG) ----
 
@@ -2422,9 +2436,10 @@ function Note() {
     }
   }
 
-  const downloadAsPDF = async () => {
+  const downloadAsPDF = async (spreadsToExport = null) => {
     if (isExportingPdf) return
     setIsExportingPdf(true)
+    setShowExportModal(false)
 
     /** Draw one element onto ctx; caller must translate/rotate first */
     const drawEl = async (ctx, el) => {
@@ -2432,7 +2447,6 @@ function Note() {
         const img = await loadImageEl(el.src)
         if (!img) return
         if (el.elementType === 'sticker') {
-          // objectFit: contain — preserve aspect ratio, centre inside box
           const nw = img.naturalWidth  || el.width
           const nh = img.naturalHeight || el.height
           const scale = Math.min(el.width / nw, el.height / nh)
@@ -2440,7 +2454,6 @@ function Note() {
           const dh = nh * scale
           ctx.drawImage(img, (el.width - dw) / 2, (el.height - dh) / 2, dw, dh)
         } else {
-          // objectFit: cover (user-uploaded photos fill the box)
           ctx.drawImage(img, 0, 0, el.width, el.height)
         }
       } else if (el.elementType === 'shape') {
@@ -2463,31 +2476,31 @@ function Note() {
     }
 
     try {
+      const numSpreads = Math.ceil(totalPages / 2)
+      const spreadsArr = spreadsToExport ?? Array.from({ length: numSpreads }, (_, i) => i)
+
       if (isBookOpen) {
-        // ── Book mode: export each SPREAD (2 pages side-by-side) as one PDF page ──
-        // This matches exactly what the user sees: 1120 × 794
+        // ── Book mode: each selected spread → 1 landscape PDF page (1120 × 794) ──
         const SPREAD_W = PAGE_W * 2
         const pdf = new jsPDF({ orientation: 'landscape', unit: 'px', format: [SPREAD_W, PAGE_H] })
-        const numSpreads = Math.ceil(totalPages / 2)
 
-        for (let si = 0; si < numSpreads; si++) {
-          if (si > 0) pdf.addPage()
+        let firstPage = true
+        for (const si of spreadsArr) {
+          if (!firstPage) pdf.addPage()
+          firstPage = false
 
           const canvas = document.createElement('canvas')
-          canvas.width  = SPREAD_W * 2   // 2× for crisp quality
+          canvas.width  = SPREAD_W * 2
           canvas.height = PAGE_H * 2
           const ctx = canvas.getContext('2d')
           ctx.scale(2, 2)
 
-          // Spread background
           ctx.fillStyle = '#f8f3e8'
           ctx.fillRect(0, 0, SPREAD_W, PAGE_H)
 
-             // Left page (pageIndex = si*2)
           const leftEls  = allSortedElements.filter(el => (el.pageIndex ?? 0) === si * 2)
           await drawPageEls(ctx, leftEls, 0)
 
-          // Right page (pageIndex = si*2 + 1), offset by PAGE_W
           const rightEls = allSortedElements.filter(el => (el.pageIndex ?? 0) === si * 2 + 1)
           await drawPageEls(ctx, rightEls, PAGE_W)
 
@@ -2497,26 +2510,33 @@ function Note() {
 
         pdf.save(`${title || 'note'}.pdf`)
       } else {
-        // ── Normal mode: one PDF page per note page ──
+        // ── Normal mode: each selected spread → 2 portrait PDF pages ──
         const pdf = new jsPDF({ orientation: 'portrait', unit: 'px', format: [PAGE_W, PAGE_H] })
 
-        for (let pi = 0; pi < totalPages; pi++) {
-          if (pi > 0) pdf.addPage()
+        let firstPage = true
+        for (const si of spreadsArr) {
+          for (let offset = 0; offset < 2; offset++) {
+            const pi = si * 2 + offset
+            if (pi >= totalPages) continue
 
-          const canvas = document.createElement('canvas')
-          canvas.width  = PAGE_W * 2
-          canvas.height = PAGE_H * 2
-          const ctx = canvas.getContext('2d')
-          ctx.scale(2, 2)
+            if (!firstPage) pdf.addPage()
+            firstPage = false
 
-          ctx.fillStyle = '#f8f3e8'
-          ctx.fillRect(0, 0, PAGE_W, PAGE_H)
+            const canvas = document.createElement('canvas')
+            canvas.width  = PAGE_W * 2
+            canvas.height = PAGE_H * 2
+            const ctx = canvas.getContext('2d')
+            ctx.scale(2, 2)
 
-          const pageEls = allSortedElements.filter(el => (el.pageIndex ?? 0) === pi)
-          await drawPageEls(ctx, pageEls, 0)
+            ctx.fillStyle = '#f8f3e8'
+            ctx.fillRect(0, 0, PAGE_W, PAGE_H)
 
-          const imgData = canvas.toDataURL('image/jpeg', 0.92)
-          pdf.addImage(imgData, 'JPEG', 0, 0, PAGE_W, PAGE_H)
+            const pageEls = allSortedElements.filter(el => (el.pageIndex ?? 0) === pi)
+            await drawPageEls(ctx, pageEls, 0)
+
+            const imgData = canvas.toDataURL('image/jpeg', 0.92)
+            pdf.addImage(imgData, 'JPEG', 0, 0, PAGE_W, PAGE_H)
+          }
         }
 
         pdf.save(`${title || 'note'}.pdf`)
@@ -2532,7 +2552,8 @@ function Note() {
   const shareAsLink = () => {
     const link = window.location.href;
     navigator.clipboard.writeText(link);
-    alert('Link copied to clipboard!');
+    setLinkCopied(true);
+    setTimeout(() => setLinkCopied(false), 2000);
   };
 
   const getSelectedShape = () => {
@@ -2836,6 +2857,81 @@ function Note() {
 
   return (
     <div className={`note-page ${isBookOpen ? 'note-page--book-open' : 'note-page--book-closed'}`}>
+      {linkCopied && (
+        <div className="note-toast">Link copied to clipboard!</div>
+      )}
+
+      {showExportModal && (() => {
+        const numSpreads = Math.ceil(totalPages / 2)
+        const allSelected = exportSpreads === null
+        return (
+          <div className="note-export-overlay" role="dialog" aria-modal="true" aria-label="Export PDF" onClick={() => setShowExportModal(false)}>
+            <div className="note-export-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="note-export-modal-header">
+                <span>Export PDF</span>
+                <button className="note-export-modal-close" onClick={() => setShowExportModal(false)} aria-label="Close">✕</button>
+              </div>
+
+              <div className="note-export-modal-body">
+                <p className="note-export-modal-label">Pages to export</p>
+
+                <label className="note-export-radio">
+                  <input type="radio" name="export-scope" checked={allSelected} onChange={() => setExportSpreads(null)} />
+                  All pages
+                </label>
+
+                <label className="note-export-radio">
+                  <input
+                    type="radio"
+                    name="export-scope"
+                    checked={!allSelected}
+                    onChange={() => setExportSpreads(new Set(Array.from({ length: numSpreads }, (_, i) => i)))}
+                  />
+                  Select spreads
+                </label>
+
+                {!allSelected && (
+                  <div className="note-export-spread-list">
+                    {Array.from({ length: numSpreads }, (_, si) => (
+                      <label key={si} className="note-export-spread-item">
+                        <input
+                          type="checkbox"
+                          checked={exportSpreads.has(si)}
+                          onChange={(e) => {
+                            const next = new Set(exportSpreads)
+                            if (e.target.checked) next.add(si)
+                            else next.delete(si)
+                            setExportSpreads(next)
+                          }}
+                        />
+                        <span className="note-export-spread-label">
+                          Spread {si + 1}
+                          <span className="note-export-spread-pages">p.{si * 2 + 1} & p.{si * 2 + 2}</span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="note-export-modal-footer">
+                <button className="note-export-btn-cancel" onClick={() => setShowExportModal(false)}>Cancel</button>
+                <button
+                  className="note-export-btn-confirm"
+                  disabled={isExportingPdf || (!allSelected && exportSpreads.size === 0)}
+                  onClick={() => {
+                    const arr = allSelected ? null : [...exportSpreads].sort((a, b) => a - b)
+                    downloadAsPDF(arr)
+                  }}
+                >
+                  <Download size={14} />
+                  {isExportingPdf ? 'Exporting…' : 'Export PDF'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
       {loading && (
         <div className="note-loading" aria-hidden="true">
           กำลังโหลด...
@@ -3374,7 +3470,7 @@ function Note() {
             {showShareMenu && (
               <div className="note-dropdown-menu">
                 <button type="button" onClick={shareAsLink}><Copy size={16} /> Copy Link</button>
-                <button type="button" onClick={downloadAsPDF} disabled={isExportingPdf}>
+                <button type="button" onClick={() => { setShowShareMenu(false); setExportSpreads(null); setShowExportModal(true) }} disabled={isExportingPdf}>
                   <Download size={16} /> {isExportingPdf ? 'Exporting…' : 'Download PDF'}
                 </button>
               </div>
@@ -3434,7 +3530,7 @@ function Note() {
             </div>
 
             {/* Clip container: clamp the sliding pages only */}
-            <div className={`note-book-pages-clip${isDragging ? ' note-book-pages-clip--dragging' : ''}`}>
+            <div className={`note-book-pages-clip${isDragging ? ' note-book-pages-clip--dragging' : ''}${turningPage ? ' note-book-pages-clip--turning' : ''}`}>
             <div
               className="note-content note-content--pages"
               style={{ transform: `translateX(-${spreadIndex * PAGE_W * 2}px)` }}
