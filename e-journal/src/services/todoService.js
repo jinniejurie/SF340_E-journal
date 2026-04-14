@@ -17,7 +17,8 @@ export async function getTodoFromFirestore(todoId) {
     title: data.title ?? '',
     items: Array.isArray(data.items) ? data.items : [],
     paperColor: data.paperColor ?? '#F7F7F7',
-    textColor: data.textColor ?? '#3A3030'
+    textColor: data.textColor ?? '#3A3030',
+    dateKey: data.dateKey ?? null
   }
 }
 

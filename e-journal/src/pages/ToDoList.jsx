@@ -81,12 +81,12 @@ function ToDoList() {
   const [paperColor, setPaperColor] = useState('#F7F7F7')
   const [textColor, setTextColor] = useState('#3A3030')
   const [loading, setLoading] = useState(false)
+  const [dateKey, setDateKey] = useState(calendarTodoResult?.dateKey ?? null)
   const paperRef = useRef(null)
   const stateRef = useRef({ title, items, paperColor, textColor })
-  const saveEffectRunCount = useRef(0)
+  const isDirty = useRef(false)
   const firestoreSaveTimeoutRef = useRef(null)
 
-  const dateKey = calendarTodoResult?.dateKey ?? null
   const storageKey = todoId ?? 'draft'
 
   stateRef.current = { title, items, paperColor, textColor }
@@ -110,6 +110,7 @@ function ToDoList() {
       if (Array.isArray(data.items)) setItems(data.items)
       if (data.paperColor) setPaperColor(data.paperColor)
       if (data.textColor) setTextColor(data.textColor)
+      if (data.dateKey) setDateKey(data.dateKey)
     }
 
     const fromLocal = getTodoFromLocalStorage(key)
@@ -132,8 +133,7 @@ function ToDoList() {
   // บันทึก localStorage ทันที; Firestore ใช้ debounce 1.5 วินาที เพื่อลด Write quota
   const FIRESTORE_DEBOUNCE_MS = 1500
   useEffect(() => {
-    saveEffectRunCount.current += 1
-    if (saveEffectRunCount.current <= 1) return
+    if (!isDirty.current) return
     const payload = {
       dateKey: dateKey ?? undefined,
       title,
@@ -143,7 +143,7 @@ function ToDoList() {
     }
     saveTodoToLocalStorage(storageKey, payload)
 
-    if (auth?.currentUser && todoId && dateKey) {
+    if (auth?.currentUser && todoId) {
       if (firestoreSaveTimeoutRef.current) clearTimeout(firestoreSaveTimeoutRef.current)
       firestoreSaveTimeoutRef.current = setTimeout(() => {
         firestoreSaveTimeoutRef.current = null
@@ -154,7 +154,7 @@ function ToDoList() {
       if (firestoreSaveTimeoutRef.current) {
         clearTimeout(firestoreSaveTimeoutRef.current)
         firestoreSaveTimeoutRef.current = null
-        if (auth?.currentUser && todoId && dateKey) {
+        if (auth?.currentUser && todoId) {
           saveTodoToFirestore(todoId, payload).catch(() => {})
         }
       }
@@ -177,6 +177,7 @@ function ToDoList() {
   const openShare = () => setOpenMenu((m) => (m === 'share' ? null : 'share'))
 
   const addItem = () => {
+    isDirty.current = true
     const newItem = {
       id: Date.now().toString(),
       text: '',
@@ -186,18 +187,21 @@ function ToDoList() {
   }
 
   const toggleItem = (id) => {
+    isDirty.current = true
     setItems(items.map((item) =>
       item.id === id ? { ...item, completed: !item.completed } : item
     ))
   }
 
   const updateItemText = (id, text) => {
+    isDirty.current = true
     setItems(items.map((item) =>
       item.id === id ? { ...item, text } : item
     ))
   }
 
   const deleteItem = (id) => {
+    isDirty.current = true
     setItems(items.filter((item) => item.id !== id))
   }
 
@@ -279,6 +283,7 @@ function ToDoList() {
                       type="color"
                       value={paperColor}
                       onChange={(e) => {
+                        isDirty.current = true
                         const v = e.target.value
                         setPaperColor(v)
                         saveToDb({ paperColor: v })
@@ -294,6 +299,7 @@ function ToDoList() {
                       type="color"
                       value={textColor}
                       onChange={(e) => {
+                        isDirty.current = true
                         const v = e.target.value
                         setTextColor(v)
                         saveToDb({ textColor: v })
@@ -333,7 +339,7 @@ function ToDoList() {
             <input
               className="todolist-title-input"
               value={title}
-              onChange={(e) => setTitle(e.target.value)}
+              onChange={(e) => { isDirty.current = true; setTitle(e.target.value) }}
               onBlur={() => {
                 setIsEditingTitle(false)
                 if (todoId) updateCalendarTodoName(todoId, title)
