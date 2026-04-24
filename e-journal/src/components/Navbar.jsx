@@ -39,6 +39,7 @@ function Navbar({
   const activeKey = useMemo(() => {
     if (location.pathname.startsWith('/account')) return 'account'
     if (location.pathname.startsWith('/calendar/search')) return 'search'
+    if (location.pathname.startsWith('/calendar/analytics')) return 'analytics'
     if (location.pathname.startsWith('/calendar')) return 'home'
     return ''
   }, [location.pathname])
@@ -125,6 +126,21 @@ function Navbar({
               </svg>
             </span>
             <span className="calendar-sidebar-link-label">Search</span>
+          </button>
+          <button
+            type="button"
+            className={`calendar-sidebar-link ${activeKey === 'analytics' ? 'calendar-sidebar-link--active' : ''}`}
+            onClick={() => goTo('/calendar/analytics')}
+          >
+            <span className="calendar-sidebar-link-icon">
+              <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path
+                  d="M4 18h16v2H4v-2Zm2-2h2V8H6v8Zm5 0h2V4h-2v12Zm5 0h2v-6h-2v6Z"
+                  fill="currentColor"
+                />
+              </svg>
+            </span>
+            <span className="calendar-sidebar-link-label">Calendar Analytics</span>
           </button>
           {isAuthed && (
             <button type="button" className="calendar-sidebar-link" onClick={handleLogoutClick}>
@@ -263,6 +279,21 @@ function Navbar({
               </svg>
             </span>
             <span className="calendar-sidebar-link-label">Search</span>
+          </button>
+          <button
+            type="button"
+            className={`calendar-sidebar-link ${activeKey === 'analytics' ? 'calendar-sidebar-link--active' : ''}`}
+            onClick={() => goTo('/calendar/analytics')}
+          >
+            <span className="calendar-sidebar-link-icon">
+              <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path
+                  d="M4 18h16v2H4v-2Zm2-2h2V8H6v8Zm5 0h2V4h-2v12Zm5 0h2v-6h-2v6Z"
+                  fill="currentColor"
+                />
+              </svg>
+            </span>
+            <span className="calendar-sidebar-link-label">Calendar Analytics</span>
           </button>
 
           {isAuthed && (

@@ -1,0 +1,168 @@
+@import url('https://fonts.googleapis.com/css2?family=Darumadrop+One&family=Dela+Gothic+One&family=Unbounded:wght@400;600&display=swap');
+
+.analytics-page {
+  align-items: stretch;
+}
+
+.analytics-main {
+  width: min(90vw, 1260px);
+  margin: 0 auto;
+  padding-top: 2.5rem;
+}
+
+.analytics-nav-btn {
+  display: flex;
+  position: fixed;
+  left: 90px;
+  top: 57px;
+  width: 45px;
+  height: 45px;
+  background: rgba(93, 75, 75, 0.1);
+  color: var(--theme-color-2);
+  border: none;
+  border-radius: 50%;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 25;
+}
+
+.analytics-nav-btn:hover {
+  background: rgba(93, 75, 75, 0.2);
+}
+
+.analytics-nav-btn--hidden {
+  display: none;
+}
+
+.analytics-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.analytics-title {
+  margin: 0;
+  font-family: 'Dela Gothic One', -apple-system, Roboto, Helvetica, sans-serif;
+  color: var(--theme-color-3);
+  font-size: clamp(1.5rem, 3.4vw, 2.75rem);
+}
+
+.analytics-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.analytics-filter-label {
+  font-family: 'Unbounded', -apple-system, Roboto, Helvetica, sans-serif;
+  font-size: 0.75rem;
+  color: var(--theme-color-2);
+}
+
+.analytics-filter-select {
+  border: 1px solid rgba(93, 75, 75, 0.25);
+  border-radius: 999px;
+  padding: 0.55rem 0.9rem;
+  background: #fff;
+  min-width: 150px;
+  font-family: 'Unbounded', -apple-system, Roboto, Helvetica, sans-serif;
+  color: var(--theme-color-2);
+}
+
+.analytics-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.9rem;
+  margin-bottom: 1rem;
+}
+
+.analytics-card {
+  background: #fff;
+  border: 1px solid rgba(93, 75, 75, 0.12);
+  border-radius: 16px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.06);
+}
+
+.analytics-card--stat {
+  padding: 1rem 1.1rem;
+}
+
+.analytics-card-label {
+  margin: 0 0 0.3rem;
+  font-family: 'Unbounded', -apple-system, Roboto, Helvetica, sans-serif;
+  font-size: 0.72rem;
+  color: #837070;
+}
+
+.analytics-card-value {
+  margin: 0;
+  font-family: 'Unbounded', -apple-system, Roboto, Helvetica, sans-serif;
+  font-size: 1.4rem;
+  color: var(--theme-color-2);
+}
+
+.analytics-charts-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.9rem;
+}
+
+.analytics-card--chart {
+  padding: 1rem 1rem 0.5rem;
+}
+
+.analytics-card-head {
+  margin-bottom: 0.3rem;
+}
+
+.analytics-section-title {
+  margin: 0;
+  font-family: 'Unbounded', -apple-system, Roboto, Helvetica, sans-serif;
+  font-size: 1rem;
+  color: var(--theme-color-2);
+}
+
+.analytics-chart-wrap {
+  width: 100%;
+  height: 330px;
+}
+
+.analytics-empty,
+.analytics-empty-inline {
+  margin: 0;
+  padding: 1rem;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px dashed rgba(93, 75, 75, 0.3);
+  font-family: 'Unbounded', -apple-system, Roboto, Helvetica, sans-serif;
+  color: #6e5a5a;
+  font-size: 0.9rem;
+}
+
+@media (max-width: 1000px) {
+  .analytics-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .analytics-charts-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .analytics-main {
+    padding-top: 1rem;
+  }
+
+  .analytics-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .analytics-summary-grid {
+    grid-template-columns: 1fr;
+  }
+}

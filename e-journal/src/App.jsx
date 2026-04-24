@@ -8,6 +8,7 @@ import Calendar from './pages/Calendar.jsx'
 import ToDoList from './pages/ToDoList.jsx'
 import Note from './pages/Note.jsx'
 import Search from './pages/Search.jsx'
+import CalendarAnalyticsPage from './pages/CalendarAnalyticsPage.jsx'
 
 function App() {
   return (
@@ -18,6 +19,7 @@ function App() {
       <Route path="/account" element={<Account />} />
       <Route path="/calendar" element={<Calendar />} />
       <Route path="/calendar/search" element={<Search />} />
+      <Route path="/calendar/analytics" element={<CalendarAnalyticsPage />} />
       <Route path="/calendar/toDoList" element={<ToDoList />} />
       <Route path="/calendar/note" element={<Note />} />
     </Routes>
