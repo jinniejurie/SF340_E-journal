@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import { collection, getDocs } from 'firebase/firestore'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { collection, getDocs, onSnapshot } from 'firebase/firestore'
 import { onAuthStateChanged } from 'firebase/auth'
 import { auth, db } from '../services/firebase'
 import {
@@ -11,6 +11,7 @@ import { saveNoteToFirestore } from '../services/noteService'
 import { saveTodoToFirestore } from '../services/todoService'
 import { useNavigate } from 'react-router-dom'
 import { MoreVertical, Trash2 } from 'lucide-react'
+import { searchCalendarNotes } from '../services/searchService'
 import Navbar from '../components/Navbar.jsx'
 import '../styles/Calendar.css'
 
@@ -49,6 +50,19 @@ function Calendar() {
   const [newTagName, setNewTagName] = useState('')
   const [newTagColor, setNewTagColor] = useState('#FF6B6B')
   const [openMenuId, setOpenMenuId] = useState(null)
+  const [isSearchFocused, setIsSearchFocused] = useState(false)
+  const searchInputRef = useRef(null)
+  const [bookmarkedKeys, setBookmarkedKeys] = useState(() => {
+    try {
+      const raw = localStorage.getItem('ejournal-bookmarks')
+      const parsed = raw ? JSON.parse(raw) : []
+      return new Set(Array.isArray(parsed) ? parsed : [])
+    } catch {
+      return new Set()
+    }
+  })
+  const [firestoreNotesById, setFirestoreNotesById] = useState({})
+  const [firestoreTodosById, setFirestoreTodosById] = useState({})
 
   const navigate = useNavigate()
 
@@ -107,37 +121,6 @@ function Calendar() {
       (arr || []).map(n => ({ ...n, dateKey }))
     )
   }, [notes])
-
-  const searchResults = useMemo(() => {
-    const q = (searchQuery || '').trim().toLowerCase()
-    if (!q) return []
-    return flatNotes
-      .filter(n => (n.name || '').toLowerCase().includes(q))
-      .slice(0, 8)
-  }, [searchQuery, flatNotes])
-
-  const handleSelectSearchResult = (note) => {
-    try {
-      const dateKey = note.dateKey || ''
-      const parts = String(dateKey).split('-')
-      if (parts.length >= 3) {
-        const y = Number(parts[0])
-        const m = Number(parts[1]) - 1
-        const d = Number(parts[2])
-        setCurrentDate(new Date(y, m, 1))
-        setSelectedDay(d)
-        setShowDayModal(true)
-      }
-    } catch (err) {
-      if (note.type === 'todo') {
-        navigate(`/calendar/toDoList?todoId=${note.id}`)
-      } else {
-        navigate('/calendar/note')
-      }
-    }
-    setSearchQuery('')
-    setSearchOpen(false)
-  }
 
   const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
     'July', 'August', 'September', 'October', 'November', 'December']
@@ -284,6 +267,66 @@ function Calendar() {
     }
   }, [])
 
+  useEffect(() => {
+    try {
+      localStorage.setItem('ejournal-bookmarks', JSON.stringify(Array.from(bookmarkedKeys)))
+    } catch {}
+  }, [bookmarkedKeys])
+
+  useEffect(() => {
+    const uid = auth?.currentUser?.uid
+    if (!db || !uid) return
+
+    const unsubUserNotes = onSnapshot(
+      collection(db, 'USER', uid, 'NOTES'),
+      (snap) => {
+        const next = {}
+        snap.docs.forEach((d) => {
+          const data = d.data()
+          next[String(d.id)] = {
+            id: String(d.id),
+            type: 'note',
+            name: data.title || 'Untitled note',
+            dateText: data.dateKey || '',
+            tagName: data.tagName || '',
+          }
+        })
+        setFirestoreNotesById(next)
+      }
+    )
+
+    return () => {
+      try { unsubUserNotes() } catch {}
+    }
+  }, [])
+
+  useEffect(() => {
+    const uid = auth?.currentUser?.uid
+    if (!db || !uid) return
+
+    const unsubUserTodos = onSnapshot(
+      collection(db, 'USER', uid, 'TODOS'),
+      (snap) => {
+        const next = {}
+        snap.docs.forEach((d) => {
+          const data = d.data()
+          next[String(d.id)] = {
+            id: String(d.id),
+            type: 'todo',
+            name: data.title || 'Untitled to-do',
+            dateText: data.dateKey || '',
+            tagName: 'To-do List',
+          }
+        })
+        setFirestoreTodosById(next)
+      }
+    )
+
+    return () => {
+      try { unsubUserTodos() } catch {}
+    }
+  }, [])
+
   const handleDayClick = (day) => {
     if (day) {
       setSelectedDay(day)
@@ -392,7 +435,35 @@ function Calendar() {
         textColor: '#3A3030',
       }).catch(() => {})
       closeDayModal()
+      navigate(`/calendar/toDoList?todoId=${newTodo.id}`)
     }
+  }
+
+  const handleOpenNote = (note) => {
+    if (note.type === 'note') {
+      navigate(`/calendar/note?noteId=${note.id}`)
+      return
+    }
+    if (note.type === 'todo') {
+      navigate(`/calendar/toDoList?todoId=${note.id}`)
+    }
+  }
+
+  const getBookmarkKey = (item) => `${item.type}:${item.id}`
+
+  const isBookmarked = (item) => bookmarkedKeys.has(getBookmarkKey(item))
+
+  const toggleBookmark = (item) => {
+    const key = getBookmarkKey(item)
+    setBookmarkedKeys(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) {
+        next.delete(key)
+      } else {
+        next.add(key)
+      }
+      return next
+    })
   }
 
   const handleCreateNewTag = () => {
@@ -416,6 +487,73 @@ function Calendar() {
     if (noteType === 'todo') return noteName.trim() !== ''
     if (noteType === 'note') return noteName.trim() !== '' && selectedTag !== null
     return false
+  }
+
+  const emotionsById = useMemo(
+    () => emotions.reduce((acc, item) => {
+      acc[item.id] = item
+      return acc
+    }, {}),
+    [emotions]
+  )
+
+  const searchResults = useMemo(
+    () => {
+      let localNotes = {}
+      try {
+        const raw = localStorage.getItem('ejournal-notes')
+        if (raw) {
+          localNotes = JSON.parse(raw)
+        }
+      } catch {}
+
+      const mergedNotes = {
+        ...(localNotes && typeof localNotes === 'object' ? localNotes : {}),
+        ...(notes && typeof notes === 'object' ? notes : {})
+      }
+
+      return searchCalendarNotes({ notesByDate: mergedNotes, query: searchQuery, emotionsById })
+    },
+    [notes, searchQuery, emotionsById]
+  )
+
+  const bookmarkedResults = useMemo(() => {
+    const localItemsByKey = Object.entries(notes ?? {}).flatMap(([dateKey, dayNotes]) =>
+      (Array.isArray(dayNotes) ? dayNotes : []).map(note => ({
+        key: `${note.type}:${note.id}`,
+        item: {
+          id: String(note.id),
+          type: note.type,
+          name: note.name,
+          dateText: dateKey,
+          tagName: note.type === 'todo' ? 'To-do List' : (note.tag?.name ?? ''),
+        }
+      }))
+    ).reduce((acc, entry) => {
+      acc[entry.key] = entry.item
+      return acc
+    }, {})
+
+    const results = Array.from(bookmarkedKeys).map((key) => {
+      const [type, id] = String(key).split(':')
+      if (type === 'note') {
+        return firestoreNotesById[id] || localItemsByKey[key] || null
+      }
+      if (type === 'todo') {
+        return firestoreTodosById[id] || localItemsByKey[key] || null
+      }
+      return localItemsByKey[key] || null
+    }).filter(Boolean)
+
+    return results.slice(0, 8)
+  }, [notes, bookmarkedKeys, firestoreNotesById, firestoreTodosById])
+
+  const handleSearchResultClick = (result) => {
+    if (result.type === 'note') {
+      navigate(`/calendar/note?noteId=${result.id}`)
+      return
+    }
+    navigate(`/calendar/toDoList?todoId=${result.id}`)
   }
 
   return (
@@ -468,21 +606,53 @@ function Calendar() {
                   </svg>
                 </span>
                 <input
+                  ref={searchInputRef}
                   className="calendar-search-input"
                   autoFocus
-                  placeholder="Search notes..."
+                  placeholder="Search by tags, mood and time"
                   value={searchQuery}
                   onChange={e => setSearchQuery(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Escape') setSearchOpen(false) }}
+                  onFocus={() => setIsSearchFocused(true)}
+                  onBlur={() => { setTimeout(() => setIsSearchFocused(false), 120) }}
                 />
                 <button className="calendar-search-close" onClick={() => { setSearchOpen(false); setSearchQuery('') }}>✕</button>
 
-                {searchResults.length > 0 && (
+                {searchQuery.trim() && (
                   <div className="calendar-search-results">
-                    {searchResults.map(r => (
-                      <button key={r.id} className="calendar-search-result" onMouseDown={e => { e.preventDefault(); handleSelectSearchResult(r) }}>
-                        <span className="result-name">{r.name}</span>
-                        <span className="result-meta">{r.type === 'todo' ? 'To-do' : (r.tag?.name || '')}</span>
+                    {searchResults.length > 0 ? (
+                      searchResults.map(r => (
+                        <button key={`${r.type}-${r.id}`} className="calendar-search-result" onMouseDown={e => { e.preventDefault(); handleSearchResultClick(r) }}>
+                          <span className="result-name">{r.name}</span>
+                          <span className="result-meta">
+                            {r.tagName}
+                            {r.moodEmoji ? ` • ${r.moodEmoji}` : ''}
+                            {r.dateText ? ` • ${r.dateText}` : ''}
+                          </span>
+                        </button>
+                      ))
+                    ) : (
+                      <div className="calendar-search-result" style={{ cursor: 'default' }}>
+                        <span className="result-name">No results found</span>
+                        <span className="result-meta">Try note name, tag, mood, or date</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {!searchQuery.trim() && isSearchFocused && bookmarkedResults.length > 0 && (
+                  <div className="calendar-search-results">
+                    {bookmarkedResults.map((result) => (
+                      <button
+                        key={`bookmark-${result.type}-${result.id}`}
+                        className="calendar-search-result"
+                        type="button"
+                        onMouseDown={e => { e.preventDefault(); handleSearchResultClick(result) }}
+                      >
+                        <span className="result-name">{result.name} ★</span>
+                        <span className="result-meta">
+                          {result.tagName}
+                          {result.dateText ? ` • ${result.dateText}` : ''}
+                        </span>
                       </button>
                     ))}
                   </div>
@@ -611,6 +781,18 @@ function Calendar() {
                           {note.emotion && ` • ${emotions.find(e => e.id === note.emotion)?.emoji}`}
                         </div>
                       </div>
+                      <button
+                        type="button"
+                        className={`note-bookmark-btn ${isBookmarked(note) ? 'is-active' : ''}`}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          toggleBookmark(note)
+                        }}
+                        title={isBookmarked(note) ? 'Remove bookmark' : 'Add bookmark'}
+                        aria-label={isBookmarked(note) ? 'Remove bookmark' : 'Add bookmark'}
+                      >
+                        {isBookmarked(note) ? '★' : '☆'}
+                      </button>
                       <div className="note-item-menu-wrapper">
                         <button
                           className="note-item-menu-btn"
