@@ -110,16 +110,66 @@
 .note-navbar {
   background-color: #F7F7F7;
   height: 60px;
-  padding: 0 2rem;
+  padding: 0 1.5rem;
   display: flex;
   align-items: center;
-  gap: 2rem;
+  gap: 1.25rem;
   box-shadow: 0px 2px 2px 0px rgba(0, 0, 0, 0.1);
   border-radius: 0 0 20px 20px;
   position: sticky;
   top: 0;
   z-index: 100;
   overflow: visible;
+}
+
+/* ส่วนชื่อ + tag ใน navbar */
+.note-nav-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex: 1;
+  min-width: 0;
+  position: relative;
+}
+
+.note-title--nav {
+  font-family: 'Unbounded', system-ui, sans-serif;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #3A3030;
+  cursor: pointer;
+  padding: 0.3rem 0.5rem;
+  border-radius: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
+  transition: background-color 0.2s;
+}
+
+.note-title--nav:hover {
+  background-color: rgba(58, 48, 48, 0.07);
+}
+
+.note-title-input--nav {
+  font-family: 'Unbounded', system-ui, sans-serif;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #3A3030;
+  background: #fff;
+  border: 2px solid #B593C2;
+  border-radius: 4px;
+  padding: 0.3rem 0.5rem;
+  outline: none;
+  max-width: 220px;
+}
+
+/* tag selector dropdown ใน navbar — วางลงต่ำกว่า navbar */
+.note-tag-selector--nav {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 200;
 }
 
 /* Canva-style hover labels: set data-tooltip="..." on the element */
@@ -252,6 +302,147 @@
 .note-dropdown-menu button:hover {
   background-color: rgba(58, 48, 48, 0.05);
 }
+
+/* ── Export PDF Modal ── */
+.note-export-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.note-export-modal {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.22);
+  width: 340px;
+  max-width: calc(100vw - 2rem);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.note-export-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem 0.75rem;
+  border-bottom: 1px solid #ebe8e2;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #3A3030;
+}
+
+.note-export-modal-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1rem;
+  color: #888;
+  padding: 0.1rem 0.3rem;
+  border-radius: 4px;
+  line-height: 1;
+}
+.note-export-modal-close:hover { background: #f0ede8; color: #3A3030; }
+
+.note-export-modal-body {
+  padding: 1rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.note-export-modal-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 0 0 0.25rem;
+}
+
+.note-export-radio {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  color: #3A3030;
+  cursor: pointer;
+  padding: 0.25rem 0;
+}
+.note-export-radio input[type="radio"] { accent-color: #3A3030; cursor: pointer; }
+
+.note-export-spread-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-top: 0.25rem;
+  padding: 0.5rem 0.75rem;
+  background: #faf9f7;
+  border-radius: 8px;
+  border: 1px solid #ebe8e2;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.note-export-spread-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: #3A3030;
+  cursor: pointer;
+  padding: 0.2rem 0;
+}
+.note-export-spread-item input[type="checkbox"] { accent-color: #3A3030; cursor: pointer; flex-shrink: 0; }
+
+.note-export-spread-label {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+.note-export-spread-pages {
+  font-size: 0.75rem;
+  color: #999;
+}
+
+.note-export-modal-footer {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  padding: 0.75rem 1.25rem 1rem;
+  border-top: 1px solid #ebe8e2;
+}
+
+.note-export-btn-cancel {
+  background: none;
+  border: 1px solid #d8d3cc;
+  border-radius: 8px;
+  padding: 0.45rem 1rem;
+  font-size: 0.85rem;
+  color: #3A3030;
+  cursor: pointer;
+}
+.note-export-btn-cancel:hover { background: #f5f2ee; }
+
+.note-export-btn-confirm {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: #3A3030;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 0.45rem 1.1rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+.note-export-btn-confirm:hover:not(:disabled) { background: #2a2020; }
+.note-export-btn-confirm:disabled { opacity: 0.45; cursor: not-allowed; }
 
 .note-stickers-menu-wrapper {
   display: flex;
@@ -470,30 +661,109 @@
   position: relative;
 }
 
+/* โหมดเปิดหนังสือ: พื้นหลังเหมือนโต๊ะ */
 .note-page--book-open .note-canvas {
-  max-width: 1280px;
-  margin: 0 auto;
-  min-height: calc(100vh - 80px);
-  border-radius: 10px;
-  box-shadow: 0 22px 44px rgba(0, 0, 0, 0.2);
-  overflow-x: hidden;
-  overflow-y: auto;
-  background:
-    linear-gradient(
-      90deg,
-      #f8f3e8 0%,
-      #f8f3e8 48.7%,
-      #d8cdbb 49.4%,
-      #c8baa5 50%,
-      #d8cdbb 50.6%,
-      #f8f3e8 51.3%,
-      #f8f3e8 100%
-    );
+  padding: 2.5rem 2rem 3rem;
+  min-height: calc(100vh - 60px);
+  overflow: auto;
+  background: #ccc5b5;
+  border-radius: 0;
+  box-shadow: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* Viewport wrapper: overflow VISIBLE เพื่อให้ arrows/pagination โชว์ได้ */
+.note-book-viewport {
+  width: 1120px;  /* 2 × PAGE_W */
+  max-width: 100%;
+  overflow: visible;
+  position: relative;
+  flex-shrink: 0;
+}
+
+/* Clip container ที่ครอบเฉพาะหน้ากระดาษ */
+.note-book-pages-clip {
+  width: 1120px;
+  overflow: hidden;
+  position: relative;
+  transition: opacity 0.15s ease;
+}
+
+/* ขณะเปลี่ยนหน้า: fade out */
+.note-book-pages-clip--turning {
+  opacity: 0;
+}
+
+/* ขณะ drag ข้ามหน้า: ปิด clip ชั่วคราวเพื่อให้ element เคลื่อนที่ข้ามได้ */
+.note-book-pages-clip--dragging,
+.note-book-pages-clip--dragging .note-page-sheet {
+  overflow: visible;
+}
+
+/* เงาสันกลางสมุด — อยู่ใน pages-clip ที่ตรง 560px พอดี */
+.note-book-pages-clip::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 48px;
+  height: 100%;
+  background: radial-gradient(
+    ellipse 24px 60% at 50% 50%,
+    rgba(0, 0, 0, 0.22) 0%,
+    rgba(0, 0, 0, 0.10) 40%,
+    transparent 100%
+  );
+  pointer-events: none;
+  z-index: 30;
 }
 
 .note-page--book-open .note-content {
-  min-height: 980px;
-  transition: transform 0.28s ease;
+  min-height: 794px;
+}
+
+/* โหมดเปิดหนังสือ: content เป็น flex row ของ page sheets */
+.note-content--pages {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35), 0 4px 12px rgba(0, 0, 0, 0.2);
+  border-radius: 2px 4px 4px 2px;
+}
+
+/* หน้ากระดาษแต่ละหน้า — คลิปทุกอย่างที่เกินขอบ (รวม rotated elements) */
+.note-page-sheet {
+  width: 560px;
+  height: 794px;
+  flex-shrink: 0;
+  overflow: hidden;
+  position: relative;
+  box-sizing: border-box;
+  background: #f8f3e8;
+}
+
+/* เงาด้านขวาของหน้าซ้าย (ใกล้สัน) */
+.note-page-sheet:first-child {
+  box-shadow: inset -8px 0 16px rgba(0, 0, 0, 0.07);
+}
+
+/* เงาด้านซ้ายของหน้าขวา (ใกล้สัน) */
+.note-page-sheet + .note-page-sheet {
+  border-left: 1px solid #beb3a0;
+  box-shadow: inset 8px 0 16px rgba(0, 0, 0, 0.07);
+}
+
+/* Export div สำหรับ html2canvas */
+.note-export-page {
+  width: 560px;
+  height: 794px;
+  position: relative;
+  overflow: hidden;
+  background: #f8f3e8;
+  color: #3A3030;
 }
 
 .note-book-arrow {
@@ -504,7 +774,7 @@
   height: 44px;
   border: 0;
   border-radius: 999px;
-  background: #fff;
+  background: rgba(255, 255, 255, 0.9);
   color: #3A3030;
   font-size: 32px;
   line-height: 1;
@@ -513,20 +783,29 @@
   z-index: 20;
 }
 
-.note-book-arrow--left { left: 10px; }
-.note-book-arrow--right { right: 10px; }
+/* วาง arrows นอก pages-clip — viewport เป็น overflow:visible แล้ว */
+.note-book-arrow--left  { left: -56px; }
+.note-book-arrow--right { right: -56px; }
 
 .note-book-pagination {
   position: absolute;
-  right: 22px;
-  bottom: 14px;
-  background: rgba(255, 255, 255, 0.85);
-  color: #3A3030;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: -40px;
+  background: rgba(255, 255, 255, 0.92);
+  color: rgba(58, 48, 48, 0.65);
   border-radius: 999px;
-  padding: 0.25rem 0.7rem;
-  font-size: 0.78rem;
+  padding: 0.25rem 0.9rem;
+  font-size: 0.75rem;
   font-weight: 600;
   z-index: 20;
+  pointer-events: none;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+  white-space: nowrap;
+}
+
+.page-num-label {
+  display: inline-block;
 }
 
 .note-header {
@@ -1357,4 +1636,26 @@
     flex-direction: column;
     gap: 1.5rem;
   }
+}
+
+.note-toast {
+  position: fixed;
+  top: 1.25rem;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #fff;
+  color: #333;
+  padding: 0.6rem 1.4rem;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+  z-index: 9999;
+  pointer-events: none;
+  animation: note-toast-in 0.2s ease;
+}
+
+@keyframes note-toast-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(-6px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
 }

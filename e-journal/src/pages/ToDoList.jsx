@@ -81,12 +81,14 @@ function ToDoList() {
   const [paperColor, setPaperColor] = useState('#F7F7F7')
   const [textColor, setTextColor] = useState('#3A3030')
   const [loading, setLoading] = useState(false)
+  const [isExporting, setIsExporting] = useState(false)
+  const [linkCopied, setLinkCopied] = useState(false)
+  const [dateKey, setDateKey] = useState(calendarTodoResult?.dateKey ?? null)
   const paperRef = useRef(null)
   const stateRef = useRef({ title, items, paperColor, textColor })
-  const saveEffectRunCount = useRef(0)
+  const isDirty = useRef(false)
   const firestoreSaveTimeoutRef = useRef(null)
 
-  const dateKey = calendarTodoResult?.dateKey ?? null
   const storageKey = todoId ?? 'draft'
 
   stateRef.current = { title, items, paperColor, textColor }
@@ -110,6 +112,7 @@ function ToDoList() {
       if (Array.isArray(data.items)) setItems(data.items)
       if (data.paperColor) setPaperColor(data.paperColor)
       if (data.textColor) setTextColor(data.textColor)
+      if (data.dateKey) setDateKey(data.dateKey)
     }
 
     const fromLocal = getTodoFromLocalStorage(key)
@@ -132,8 +135,7 @@ function ToDoList() {
   // บันทึก localStorage ทันที; Firestore ใช้ debounce 1.5 วินาที เพื่อลด Write quota
   const FIRESTORE_DEBOUNCE_MS = 1500
   useEffect(() => {
-    saveEffectRunCount.current += 1
-    if (saveEffectRunCount.current <= 1) return
+    if (!isDirty.current) return
     const payload = {
       dateKey: dateKey ?? undefined,
       title,
@@ -143,7 +145,7 @@ function ToDoList() {
     }
     saveTodoToLocalStorage(storageKey, payload)
 
-    if (auth?.currentUser && todoId && dateKey) {
+    if (auth?.currentUser && todoId) {
       if (firestoreSaveTimeoutRef.current) clearTimeout(firestoreSaveTimeoutRef.current)
       firestoreSaveTimeoutRef.current = setTimeout(() => {
         firestoreSaveTimeoutRef.current = null
@@ -154,7 +156,7 @@ function ToDoList() {
       if (firestoreSaveTimeoutRef.current) {
         clearTimeout(firestoreSaveTimeoutRef.current)
         firestoreSaveTimeoutRef.current = null
-        if (auth?.currentUser && todoId && dateKey) {
+        if (auth?.currentUser && todoId) {
           saveTodoToFirestore(todoId, payload).catch(() => {})
         }
       }
@@ -177,6 +179,7 @@ function ToDoList() {
   const openShare = () => setOpenMenu((m) => (m === 'share' ? null : 'share'))
 
   const addItem = () => {
+    isDirty.current = true
     const newItem = {
       id: Date.now().toString(),
       text: '',
@@ -186,24 +189,29 @@ function ToDoList() {
   }
 
   const toggleItem = (id) => {
+    isDirty.current = true
     setItems(items.map((item) =>
       item.id === id ? { ...item, completed: !item.completed } : item
     ))
   }
 
   const updateItemText = (id, text) => {
+    isDirty.current = true
     setItems(items.map((item) =>
       item.id === id ? { ...item, text } : item
     ))
   }
 
   const deleteItem = (id) => {
+    isDirty.current = true
     setItems(items.filter((item) => item.id !== id))
   }
 
   const downloadAsPDF = async () => {
     if (!paperRef.current) return
     setOpenMenu(null)
+    setIsExporting(true)
+    await new Promise((r) => setTimeout(r, 80))
     try {
       const canvas = await html2canvas(paperRef.current, {
         scale: 2,
@@ -212,41 +220,39 @@ function ToDoList() {
         logging: false
       })
       const imgData = canvas.toDataURL('image/png')
-      const pdf = new jsPDF({
-        orientation: 'portrait',
-        unit: 'mm',
-        format: 'a4'
-      })
-      const pageW = pdf.internal.pageSize.getWidth()
-      const pageH = pdf.internal.pageSize.getHeight()
-      const imgW = canvas.width
-      const imgH = canvas.height
       const pxToMm = 0.264583
-      const margin = 10
-      let w = imgW * pxToMm
-      let h = imgH * pxToMm
-      const scale = Math.min((pageW - margin * 2) / w, (pageH - margin * 2) / h, 1)
-      w *= scale
-      h *= scale
-      pdf.addImage(imgData, 'PNG', (pageW - w) / 2, (pageH - h) / 2, w, h)
+      const pdfW = (canvas.width / 2) * pxToMm
+      const pdfH = (canvas.height / 2) * pxToMm
+      const pdf = new jsPDF({
+        orientation: pdfW > pdfH ? 'landscape' : 'portrait',
+        unit: 'mm',
+        format: [pdfW, pdfH]
+      })
+      pdf.addImage(imgData, 'PNG', 0, 0, pdfW, pdfH)
       const safeName = (title || 'todo-list').replace(/[<>:"/\\|?*]/g, '').trim().slice(0, 60) || 'todo-list'
       pdf.save(`${safeName}.pdf`)
     } catch (err) {
       console.error(err)
       alert('ไม่สามารถสร้าง PDF ได้ กรุณาลองอีกครั้ง')
+    } finally {
+      setIsExporting(false)
     }
   }
 
   const shareAsLink = () => {
     const link = window.location.href
     navigator.clipboard.writeText(link)
-    alert('Link copied to clipboard!')
+    setLinkCopied(true)
+    setTimeout(() => setLinkCopied(false), 2000)
   }
 
   const navigate = useNavigate()
 
   return (
     <div className="todolist-page">
+      {linkCopied && (
+        <div className="todolist-toast">Link copied to clipboard!</div>
+      )}
       {loading && (
         <div className="todolist-loading" aria-hidden="true">
           กำลังโหลด...
@@ -279,6 +285,7 @@ function ToDoList() {
                       type="color"
                       value={paperColor}
                       onChange={(e) => {
+                        isDirty.current = true
                         const v = e.target.value
                         setPaperColor(v)
                         saveToDb({ paperColor: v })
@@ -294,6 +301,7 @@ function ToDoList() {
                       type="color"
                       value={textColor}
                       onChange={(e) => {
+                        isDirty.current = true
                         const v = e.target.value
                         setTextColor(v)
                         saveToDb({ textColor: v })
@@ -333,7 +341,7 @@ function ToDoList() {
             <input
               className="todolist-title-input"
               value={title}
-              onChange={(e) => setTitle(e.target.value)}
+              onChange={(e) => { isDirty.current = true; setTitle(e.target.value) }}
               onBlur={() => {
                 setIsEditingTitle(false)
                 if (todoId) updateCalendarTodoName(todoId, title)
@@ -387,27 +395,31 @@ function ToDoList() {
                     }}
                   />
 
-                  <button
-                    className="todolist-delete-btn"
-                    onClick={() => deleteItem(item.id)}
-                  >
-                    ×
-                  </button>
+                  {!isExporting && (
+                    <button
+                      className="todolist-delete-btn"
+                      onClick={() => deleteItem(item.id)}
+                    >
+                      ×
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
 
-            <button
-              className="todolist-add-btn todolist-add-btn-circle"
-              onClick={addItem}
-              title="Add item"
-              style={{
-                color: textColor,
-                backgroundColor: `${textColor}15`
-              }}
-            >
-              <Plus size={20} />
-            </button>
+            {!isExporting && (
+              <button
+                className="todolist-add-btn todolist-add-btn-circle"
+                onClick={addItem}
+                title="Add item"
+                style={{
+                  color: textColor,
+                  backgroundColor: `${textColor}15`
+                }}
+              >
+                <Plus size={20} />
+              </button>
+            )}
           </div>
         </div>
       </div>
