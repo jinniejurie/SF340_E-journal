@@ -2,17 +2,19 @@ import { useMemo, useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { collection, getDocs } from 'firebase/firestore'
 import { onAuthStateChanged } from 'firebase/auth'
+import { Calendar } from 'lucide-react'
 import Navbar from '../components/Navbar.jsx'
+import { EmojiRenderer } from '../components/EmojiRenderer'
 import { db, auth } from '../services/firebase'
 import '../styles/Calendar.css'
 import '../styles/Search.css'
 
 const DEFAULT_EMOTIONS = [
-  { id: 'm01', emoji: '😠', label: 'Angry' },
-  { id: 'm02', emoji: '😢', label: 'Sad' },
-  { id: 'm03', emoji: '😌', label: 'Calm' },
-  { id: 'm04', emoji: '😊', label: 'Happy' },
-  { id: 'm05', emoji: '🤩', label: 'Excited' }
+    { id: 'm01', emoji: new URL('../assets/emoji/angri.PNG', import.meta.url).href, label: 'Angry' },
+    { id: 'm02', emoji: new URL('../assets/emoji/uhhh.PNG', import.meta.url).href, label: 'Bad' },
+    { id: 'm03', emoji: new URL('../assets/emoji/meh.PNG', import.meta.url).href, label: 'Calm' },
+    { id: 'm04', emoji: new URL('../assets/emoji/happi.PNG', import.meta.url).href, label: 'Happy' },
+    { id: 'm05', emoji: new URL('../assets/emoji/excited.PNG', import.meta.url).href, label: 'Excited' }
 ]
 
 function getTodoDetail(id) {
@@ -52,6 +54,9 @@ function Search() {
   const [emotions, setEmotions] = useState(DEFAULT_EMOTIONS)
   const [notes, setNotes] = useState({})
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
+  const [showMonthPicker, setShowMonthPicker] = useState(false)
+  const [selectedMonth, setSelectedMonth] = useState(null)
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear())
 
   const loadNotes = () => {
     try {
@@ -131,6 +136,21 @@ function Search() {
 
     if (moodFilter) list = list.filter(n => (n.emotion || n.mood) === moodFilter)
 
+    // Filter by month and year if selected
+    if (selectedMonth !== null && selectedYear) {
+      list = list.filter(n => {
+        try {
+          const dateParts = String(n.dateKey).split('-')
+          if (dateParts.length >= 2) {
+            const noteYear = parseInt(dateParts[0])
+            const noteMonth = parseInt(dateParts[1])
+            return noteYear === selectedYear && noteMonth === selectedMonth
+          }
+        } catch (e) {}
+        return false
+      })
+    }
+
     if (!q) return list
 
     return list.filter(n => {
@@ -153,7 +173,7 @@ function Search() {
 
       return false
     })
-  }, [query, typeFilter, moodFilter, flatNotes])
+  }, [query, typeFilter, moodFilter, flatNotes, selectedMonth, selectedYear])
 
   const handleSelect = (item) => {
     if (item.type === 'todo') {
@@ -202,22 +222,159 @@ function Search() {
       <div className="search-main">
         <h1 className="search-hero-title">Search</h1>
         <div className="search-hero">
-          <div className="search-bar search-bar--hero">
-            <span className="search-bar-icon" aria-hidden>
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="11" cy="11" r="8" />
-                <line x1="21" y1="21" x2="16.65" y2="16.65" />
-              </svg>
-            </span>
-            <input
-              type="search"
-              className="search-bar-input"
-              placeholder="Search notes, to-dos, tags..."
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              autoFocus
-              aria-label="Search"
-            />
+          <div className="search-bar-container" style={{ display: 'flex', alignItems: 'stretch', gap: '10px' }}>
+            <div className="search-bar search-bar--hero">
+              <span className="search-bar-icon" aria-hidden>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="11" cy="11" r="8" />
+                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+              </span>
+              <input
+                type="search"
+                className="search-bar-input"
+                placeholder="Search notes, to-dos, tags..."
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                autoFocus
+                aria-label="Search"
+              />
+            </div>
+            <div className="search-month-picker-wrapper" style={{ position: 'relative', display: 'flex', alignItems: 'stretch' }}>
+              <button
+                type="button"
+                className={`search-month-btn${showMonthPicker ? ' search-month-btn--active' : ''}${selectedMonth !== null ? ' search-month-btn--selected' : ''}`}
+                onClick={() => setShowMonthPicker(!showMonthPicker)}
+                title="Search by month"
+                aria-label="Search by month"
+                aria-expanded={showMonthPicker}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  aspectRatio: '1 / 1',
+                  padding: 0,
+                  border: selectedMonth !== null
+                    ? '2px solid #222'
+                    : showMonthPicker
+                      ? '2px solid #444'
+                      : '2px solid #d0d0d0',
+                  borderRadius: '12px',
+                  background: selectedMonth !== null ? '#222' : showMonthPicker ? '#f5f5f5' : '#fff',
+                  color: selectedMonth !== null ? '#fff' : '#444',
+                  cursor: 'pointer',
+                  flexShrink: 0,
+                  transition: 'border-color 0.18s, background 0.18s, color 0.18s',
+                  boxShadow: showMonthPicker ? '0 2px 8px rgba(0,0,0,0.10)' : 'none',
+                  minWidth: 0,
+                }}
+              >
+                <Calendar size={20} />
+              </button>
+
+              {showMonthPicker && (
+                <>
+                  {/* Backdrop */}
+                  <div
+                    style={{ position: 'fixed', inset: 0, zIndex: 99 }}
+                    onClick={() => setShowMonthPicker(false)}
+                    aria-hidden
+                  />
+                  <div
+                    className="search-month-picker-dropdown"
+                    style={{
+                      position: 'absolute',
+                      top: 'calc(100% + 10px)',
+                      right: 0,
+                      zIndex: 100,
+                      background: '#fff',
+                      border: '1.5px solid #e8e8e8',
+                      borderRadius: '16px',
+                      boxShadow: '0 8px 32px rgba(0,0,0,0.13)',
+                      padding: '18px 18px 14px',
+                      minWidth: '260px',
+                    }}
+                  >
+                    {/* Year row */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedYear(y => y - 1)}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px', fontSize: '16px', color: '#555', borderRadius: '8px', lineHeight: 1 }}
+                        aria-label="Previous year"
+                      >‹</button>
+                      <span style={{ fontWeight: 600, fontSize: '15px', color: '#222', letterSpacing: '0.02em' }}>{selectedYear}</span>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedYear(y => y + 1)}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px', fontSize: '16px', color: '#555', borderRadius: '8px', lineHeight: 1 }}
+                        aria-label="Next year"
+                      >›</button>
+                    </div>
+
+                    {/* Month grid */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
+                      {[
+                        'January', 'February', 'March', 'April', 'May', 'June',
+                        'July', 'August', 'September', 'October', 'November', 'December'
+                      ].map((month, idx) => {
+                        const isActive = selectedMonth === idx + 1
+                        return (
+                          <button
+                            key={month}
+                            type="button"
+                            onClick={() => {
+                              setSelectedMonth(selectedMonth === idx + 1 ? null : idx + 1)
+                              setShowMonthPicker(false)
+                            }}
+                            style={{
+                              padding: '7px 4px',
+                              border: isActive ? '2px solid #222' : '1.5px solid transparent',
+                              borderRadius: '10px',
+                              background: isActive ? '#222' : 'transparent',
+                              color: isActive ? '#fff' : '#444',
+                              fontWeight: isActive ? 600 : 400,
+                              fontSize: '13px',
+                              cursor: 'pointer',
+                              transition: 'background 0.15s, color 0.15s, border-color 0.15s',
+                              textAlign: 'center',
+                            }}
+                            onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = '#f2f2f2'; e.currentTarget.style.borderColor = '#ddd' } }}
+                            onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent' } }}
+                          >
+                            {month.slice(0, 3)}
+                          </button>
+                        )
+                      })}
+                    </div>
+
+                    {/* Clear filter */}
+                    {selectedMonth !== null && (
+                      <button
+                        type="button"
+                        onClick={() => { setSelectedMonth(null); setShowMonthPicker(false) }}
+                        style={{
+                          marginTop: '12px',
+                          width: '100%',
+                          padding: '7px',
+                          border: '1.5px solid #e0e0e0',
+                          borderRadius: '10px',
+                          background: 'transparent',
+                          color: '#888',
+                          fontSize: '13px',
+                          cursor: 'pointer',
+                          transition: 'background 0.15s',
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.background = '#f7f7f7'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                      >
+                        Clear month filter
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
 
@@ -257,7 +414,7 @@ function Search() {
                   title={e.label}
                   aria-label={e.label}
                 >
-                  {e.emoji}
+                  <EmojiRenderer emoji={e.emoji} label={e.label} />
                 </button>
               ))}
             </div>
@@ -294,7 +451,7 @@ function Search() {
                         <span className="search-result-date">{formatDate(item.dateKey)}</span>
                         {(item.emotion || item.mood) && (
                           <span className="search-result-mood">
-                            {emotions.find(ev => ev.id === (item.emotion || item.mood))?.emoji}
+                            <EmojiRenderer emoji={emotions.find(ev => ev.id === (item.emotion || item.mood))?.emoji || ''} />
                           </span>
                         )}
                       </div>
