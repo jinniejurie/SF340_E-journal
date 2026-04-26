@@ -29,7 +29,9 @@ import {
   Bold,
   Italic,
   Strikethrough,
-  Highlighter
+  Highlighter,
+  Pencil,
+  ImagePlus
 } from 'lucide-react'
 import { auth } from '../services/firebase'
 import { getNoteFromFirestore, saveNoteToFirestore } from '../services/noteService'
@@ -102,6 +104,12 @@ const TEXT_HIGHLIGHT_PALETTE = [
 ]
 
 const NOTE_STORAGE_KEY = (id) => `ejournal-note-${id ?? 'draft'}`
+
+const PENCIL_PRESETS = [
+  '#000000', '#ffffff', '#dc2626', '#ea580c',
+  '#ca8a04', '#16a34a', '#2563eb', '#7c3aed',
+  '#db2777', '#0891b2', '#65a30d', '#854d0e',
+]
 
 // ---- Page model ----
 // เมื่อเปิดหนังสือ elements แต่ละตัวจะถูกวางใน .note-page-sheet ของหน้าตัวเอง
@@ -1004,6 +1012,7 @@ function Note() {
       setShowShapesMenu(false);
       setShowStickersMenu(false);
       setShowPostItMenu(false);
+      setShowPencilMenu(false);
     }
   }
   const [isDragging, setIsDragging] = useState(false)
@@ -1012,6 +1021,28 @@ function Note() {
   const [contextMenu, setContextMenu] = useState(null)
   const [clipboard, setClipboard] = useState(null)
   const [isContextMenuOpen, setIsContextMenuOpen] = useState(false)
+
+  // ---- Pencil drawing ----
+  const [isPencilMode, setIsPencilMode] = useState(false)
+  const [pencilColor, setPencilColor] = useState('#222222')
+  const [pencilThickness, setPencilThickness] = useState(3)
+  const [showPencilMenu, setShowPencilMenu] = useState(false)
+  // drawingStrokes stores finished strokes as {dataUrl, pageIndex, id}
+  const [drawingStrokes, setDrawingStrokes] = useState([])
+  // per-page canvas refs for live drawing (not in React state)
+  const drawCanvasRefs = useRef({}) // pageIndex -> canvas element
+  const drawingActiveRef = useRef(false)
+  const pencilColorRef = useRef('#222222')
+  const pencilThicknessRef = useRef(3)
+  const pencilMenuRef = useRef(null)
+
+  // keep refs in sync with state so canvas handlers always see latest values
+  useEffect(() => { pencilColorRef.current = pencilColor }, [pencilColor])
+  useEffect(() => { pencilThicknessRef.current = pencilThickness }, [pencilThickness])
+
+  // ---- Page background image ----
+  const [pageBgImage, setPageBgImage] = useState('') // base64 or URL
+  const pageBgInputRef = useRef(null)
   const canvasRef = useRef(null)
   const fileInputRef = useRef(null)
   const coverImageInputRef = useRef(null)
@@ -2837,6 +2868,106 @@ function Note() {
     );
   };
 
+  // ---- Pencil canvas helper ----
+  // Returns mouseDown handler for a page canvas. Draws imperatively; only calls setState on mouseUp.
+  const makePencilHandlers = useCallback((pi) => {
+    return {
+      onMouseDown(e) {
+        if (!isPencilMode) return
+        const canvas = drawCanvasRefs.current[pi]
+        if (!canvas) return
+        e.preventDefault(); e.stopPropagation()
+        drawingActiveRef.current = true
+        const ctx = canvas.getContext('2d')
+        const rect = canvas.getBoundingClientRect()
+        const color = pencilColorRef.current
+        const thickness = pencilThicknessRef.current
+
+        // Catmull-Rom smooth drawing — keep last two points
+        let pts = []
+        const getPos = (ev) => ({ x: ev.clientX - rect.left, y: ev.clientY - rect.top })
+        const startPt = getPos(e)
+        pts.push(startPt, startPt)
+
+        // Draw a small dot for single click
+        ctx.save()
+        ctx.beginPath()
+        ctx.arc(startPt.x, startPt.y, thickness / 2, 0, Math.PI * 2)
+        ctx.fillStyle = color
+        ctx.fill()
+        ctx.restore()
+
+        const drawSegment = (p0, p1, p2, p3) => {
+          // Catmull-Rom to Bezier conversion
+          const cp1x = p1.x + (p2.x - p0.x) / 6
+          const cp1y = p1.y + (p2.y - p0.y) / 6
+          const cp2x = p2.x - (p3.x - p1.x) / 6
+          const cp2y = p2.y - (p3.y - p1.y) / 6
+          ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y)
+        }
+
+        const applyPencilTexture = (ctx, thickness, color) => {
+          // Pencil grain: random offset strokes at low opacity
+          const grains = Math.max(2, Math.floor(thickness * 1.2))
+          for (let i = 0; i < grains; i++) {
+            const jx = (Math.random() - 0.5) * thickness * 0.7
+            const jy = (Math.random() - 0.5) * thickness * 0.7
+            ctx.save()
+            ctx.translate(jx, jy)
+            ctx.globalAlpha = 0.07 + Math.random() * 0.10
+            ctx.stroke()
+            ctx.restore()
+          }
+        }
+
+        ctx.save()
+        ctx.strokeStyle = color
+        ctx.lineWidth = thickness
+        ctx.lineCap = 'round'
+        ctx.lineJoin = 'round'
+        ctx.globalAlpha = 0.88
+        ctx.beginPath()
+        ctx.moveTo(startPt.x, startPt.y)
+
+        const onMove = (mv) => {
+          if (!drawingActiveRef.current) return
+          const pt = getPos(mv)
+          pts.push(pt)
+          if (pts.length >= 4) {
+            const [p0, p1, p2, p3] = pts.slice(-4)
+            drawSegment(p0, p1, p2, p3)
+            ctx.stroke()
+            applyPencilTexture(ctx, thickness, color)
+            ctx.beginPath()
+            ctx.moveTo(p2.x, p2.y)
+          } else if (pts.length === 3) {
+            const [p0, p1, p2] = pts
+            ctx.lineTo(p2.x, p2.y)
+            ctx.stroke()
+            applyPencilTexture(ctx, thickness, color)
+            ctx.beginPath()
+            ctx.moveTo(p2.x, p2.y)
+          }
+        }
+
+        const onUp = () => {
+          ctx.restore()
+          drawingActiveRef.current = false
+          // Bake the canvas to a dataURL and store as a finished stroke
+          const dataUrl = canvas.toDataURL()
+          setDrawingStrokes(prev => [...prev, { id: Date.now(), pageIndex: pi, dataUrl }])
+          // Clear the live canvas (the stroke is now in the stored image layer)
+          ctx.clearRect(0, 0, canvas.width, canvas.height)
+          document.removeEventListener('mousemove', onMove)
+          document.removeEventListener('mouseup', onUp)
+        }
+
+        document.addEventListener('mousemove', onMove)
+        document.addEventListener('mouseup', onUp)
+      }
+    }
+  }, [isPencilMode])
+
   // ---- สร้าง element list ที่ normalize แล้ว + จัดกลุ่มตาม page ----
   const allSortedElements = useMemo(() => {
     const raw = [
@@ -3110,24 +3241,35 @@ function Note() {
               )}
             </div>
           ) : (
-            <div
-              className="note-tag"
-              style={{ backgroundColor: tagColor }}
-              role="button"
-              aria-label="Select or create tag"
-              tabIndex={0}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
+            <div className="note-tag-with-date">
+              <div
+                className="note-tag"
+                style={{ backgroundColor: tagColor }}
+                role="button"
+                aria-label="Select or create tag"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setShowTagSelector(true);
+                  }
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
                   setShowTagSelector(true);
-                }
-              }}
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowTagSelector(true);
-              }}
-            >
-              {tagName}
+                }}
+              >
+                {tagName}
+              </div>
+              {latestNote?.date && (
+                <span className="note-date-display">
+                  {new Date(latestNote.date).toLocaleDateString('en-GB', {
+                    day: 'numeric',
+                    month: 'short',
+                    year: '2-digit'
+                  })}
+                </span>
+              )}
             </div>
           )}
         </div>
@@ -3378,6 +3520,135 @@ function Note() {
             style={{ display: 'none' }}
           />
 
+          {/* ---- Pencil tool ---- */}
+          <div className="note-nav-dropdown" ref={pencilMenuRef}>
+            <button
+              type="button"
+              className={`note-nav-btn${isPencilMode ? ' active' : ''}`}
+              data-tooltip="Pencil"
+              aria-label="Pencil draw"
+              style={isPencilMode ? { color: pencilColor, background: 'rgba(0,0,0,0.08)' } : {}}
+              onClick={() => {
+                const next = !isPencilMode
+                setIsPencilMode(next)
+                setShowPencilMenu(next)
+                if (next) {
+                  setIsAddingTextBox(false); setShowShapesMenu(false)
+                  setShowStickersMenu(false); setShowPostItMenu(false)
+                  setShowShareMenu(false); setShowColorPicker(false)
+                  setPendingPostItColor(null)
+                }
+              }}
+            >
+              <Pencil size={20} />
+            </button>
+            {showPencilMenu && (
+              <div
+                className="note-dropdown-menu"
+                style={{ width: 220, padding: '12px 14px' }}
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <div style={{ fontWeight: 600, fontSize: 12, color: '#555', marginBottom: 8 }}>Pencil</div>
+
+                {/* Thickness */}
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>
+                    Thickness: <strong>{pencilThickness}px</strong>
+                  </div>
+                  <input
+                    type="range" min={1} max={24} value={pencilThickness}
+                    onChange={(e) => setPencilThickness(Number(e.target.value))}
+                    style={{ width: '100%', accentColor: pencilColor }}
+                  />
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#aaa' }}>
+                    <span>Thin</span><span>Thick</span>
+                  </div>
+                </div>
+
+                {/* Preview */}
+                <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{
+                    flex: 1, height: pencilThickness + 8, background: pencilColor,
+                    borderRadius: pencilThickness / 2 + 4, border: '1px solid rgba(0,0,0,0.1)'
+                  }} />
+                </div>
+
+                {/* Color presets */}
+                <div style={{ fontSize: 11, color: '#888', marginBottom: 6 }}>Color</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 5, marginBottom: 8 }}>
+                  {PENCIL_PRESETS.map(c => (
+                    <button
+                      key={c} type="button"
+                      onClick={() => setPencilColor(c)}
+                      style={{
+                        width: 26, height: 26, borderRadius: '50%',
+                        background: c,
+                        border: pencilColor === c ? '2.5px solid #333' : '1.5px solid rgba(0,0,0,0.15)',
+                        cursor: 'pointer', boxShadow: pencilColor === c ? '0 0 0 2px white inset' : 'none',
+                        transition: 'transform 0.1s',
+                      }}
+                      aria-label={`Color ${c}`}
+                    />
+                  ))}
+                </div>
+
+                {/* Color wheel */}
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 12, color: '#555' }}>
+                  <input
+                    type="color" value={pencilColor}
+                    onChange={(e) => setPencilColor(e.target.value)}
+                    style={{ width: 28, height: 28, border: 'none', borderRadius: 6, cursor: 'pointer', padding: 0 }}
+                  />
+                  Custom color
+                </label>
+
+                <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
+                  <button
+                    type="button"
+                    onClick={() => setDrawingStrokes([])}
+                    style={{
+                      flex: 1, padding: '5px 0', border: '1px solid #e0e0e0', borderRadius: 6,
+                      background: '#fff', fontSize: 12, cursor: 'pointer', color: '#c00'
+                    }}
+                  >Clear all</button>
+                  <button
+                    type="button"
+                    onClick={() => { setIsPencilMode(false); setShowPencilMenu(false) }}
+                    style={{
+                      flex: 1, padding: '5px 0', border: '1px solid #e0e0e0', borderRadius: 6,
+                      background: '#222', fontSize: 12, cursor: 'pointer', color: '#fff'
+                    }}
+                  >Done</button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ---- Page BG image upload ---- */}
+          <button
+            type="button"
+            className="note-nav-btn"
+            data-tooltip="Page Background"
+            aria-label="Change page background"
+            onClick={() => pageBgInputRef.current?.click()}
+          >
+            <ImagePlus size={20} />
+          </button>
+          <input
+            ref={pageBgInputRef}
+            type="file"
+            accept="image/*"
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              if (!file) return
+              const reader = new FileReader()
+              reader.onload = (ev) => setPageBgImage(String(ev.target?.result || ''))
+              reader.readAsDataURL(file)
+              e.target.value = ''
+            }}
+            style={{ display: 'none' }}
+          />
+
           {selectedItem?.type === 'shape' && (
             <>
               <div className="note-nav-divider" />
@@ -3499,6 +3770,7 @@ function Note() {
             setShowPostItMenu(false);
             setShowShareMenu(false);
             setShowColorPicker(false);
+            setShowPencilMenu(false);
             handleSelectItem(null);
           }
           handleCanvasClick(e);
@@ -3509,7 +3781,7 @@ function Note() {
             handleSelectItem(null);
           }
         }}
-        style={{ cursor: isAddingTextBox || pendingPostItColor ? 'crosshair' : 'default' }}
+        style={{ cursor: isPencilMode ? 'crosshair' : (isAddingTextBox || pendingPostItColor ? 'crosshair' : 'default') }}
       >
         {isBookOpen ? (
           /* Book mode: viewport wrapper (overflow:visible) ➜ clip-wrapper (overflow:hidden) ➜ pages */
@@ -3536,7 +3808,28 @@ function Note() {
               style={{ transform: `translateX(-${spreadIndex * PAGE_W * 2}px)` }}
             >
               {Array.from({ length: totalPages }, (_, pi) => {
-                return (<div key={pi} className="note-page-sheet">
+                return (<div key={pi} className="note-page-sheet" style={pageBgImage ? {
+                  backgroundImage: `url(${pageBgImage})`,
+                  backgroundSize: 'cover',
+                  backgroundPosition: 'center',
+                } : {}}>
+                  {/* Finished strokes image layer */}
+                  {drawingStrokes.filter(s => s.pageIndex === pi).map(stroke => (
+                    <img
+                      key={stroke.id}
+                      src={stroke.dataUrl}
+                      alt=""
+                      style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 8999 }}
+                    />
+                  ))}
+                  {/* Live drawing canvas (active stroke only, never causes React re-render) */}
+                  <canvas
+                    ref={(el) => { if (el) { drawCanvasRefs.current[pi] = el; el.width = PAGE_W; el.height = PAGE_H } else { delete drawCanvasRefs.current[pi] } }}
+                    width={PAGE_W}
+                    height={PAGE_H}
+                    style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: isPencilMode ? 'all' : 'none', zIndex: 9000, cursor: isPencilMode ? 'crosshair' : 'default', touchAction: 'none' }}
+                    {...makePencilHandlers(pi)}
+                  />
                   {allSortedElements.filter(el => (el.pageIndex ?? 0) === pi).map((element) => {
               if (element.elementType === 'shape') {
                 const shape = element;
@@ -4285,7 +4578,26 @@ function Note() {
           /* Non-book mode: same per-page approach, just no clipping, abs positioned */
           <div className="note-content" style={{ position: 'relative', minHeight: totalPages * 0 + PAGE_H }}>
             {Array.from({ length: totalPages }, (_, pi) => (
-              <div key={pi} style={{ position: 'absolute', left: pi * PAGE_W, top: 0, width: PAGE_W, height: PAGE_H, overflow: 'visible' }}>
+              <div key={pi} style={{ position: 'absolute', left: pi * PAGE_W, top: 0, width: PAGE_W, height: PAGE_H, overflow: 'visible',
+                ...(pageBgImage ? { backgroundImage: `url(${pageBgImage})`, backgroundSize: 'cover', backgroundPosition: 'center' } : {})
+              }}>
+                {/* Finished strokes image layer */}
+                {drawingStrokes.filter(s => s.pageIndex === pi).map(stroke => (
+                  <img
+                    key={stroke.id}
+                    src={stroke.dataUrl}
+                    alt=""
+                    style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 8999 }}
+                  />
+                ))}
+                {/* Live drawing canvas */}
+                <canvas
+                  ref={(el) => { if (el) { drawCanvasRefs.current[pi] = el; el.width = PAGE_W; el.height = PAGE_H } else { delete drawCanvasRefs.current[pi] } }}
+                  width={PAGE_W}
+                  height={PAGE_H}
+                  style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: isPencilMode ? 'all' : 'none', zIndex: 9000, cursor: isPencilMode ? 'crosshair' : 'default', touchAction: 'none' }}
+                  {...makePencilHandlers(pi)}
+                />
                 {allSortedElements.filter(el => (el.pageIndex ?? 0) === pi).map((element) => {
                   if (element.elementType === 'shape') {
                     const shape = element; const isSelected = selectedItem?.type === 'shape' && selectedItem.id === shape.id;
