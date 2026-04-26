@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { collection, getDocs, onSnapshot } from 'firebase/firestore'
 import { onAuthStateChanged } from 'firebase/auth'
 import { auth, db } from '../services/firebase'
+import { EmojiRenderer } from '../components/EmojiRenderer'
 import {
   getCalendarNotesFromFirestore,
   saveCalendarNoteToFirestore,
@@ -51,6 +52,8 @@ function Calendar() {
   const [newTagColor, setNewTagColor] = useState('#FF6B6B')
   const [openMenuId, setOpenMenuId] = useState(null)
   const [isSearchFocused, setIsSearchFocused] = useState(false)
+  const [showYearPicker, setShowYearPicker] = useState(false)
+  const [emojiEffect, setEmojiEffect] = useState(null) // { id, particles }
   const searchInputRef = useRef(null)
   const [bookmarkedKeys, setBookmarkedKeys] = useState(() => {
     try {
@@ -109,11 +112,11 @@ function Calendar() {
   })
 
   const [emotions, setEmotions] = useState([
-    { id: 'm01', emoji: '😠', label: 'Angry' },
-    { id: 'm02', emoji: '😢', label: 'Sad' },
-    { id: 'm03', emoji: '😌', label: 'Calm' },
-    { id: 'm04', emoji: '😊', label: 'Happy' },
-    { id: 'm05', emoji: '🤩', label: 'Excited' }
+    { id: 'm01', emoji: new URL('../assets/emoji/angri.PNG', import.meta.url).href, label: 'Angry' },
+    { id: 'm02', emoji: new URL('../assets/emoji/uhhh.PNG', import.meta.url).href, label: 'Bad' },
+    { id: 'm03', emoji: new URL('../assets/emoji/meh.PNG', import.meta.url).href, label: 'Calm' },
+    { id: 'm04', emoji: new URL('../assets/emoji/happi.PNG', import.meta.url).href, label: 'Happy' },
+    { id: 'm05', emoji: new URL('../assets/emoji/excited.PNG', import.meta.url).href, label: 'Excited' }
   ])
 
   const flatNotes = useMemo(() => {
@@ -194,10 +197,10 @@ function Calendar() {
   useEffect(() => {
     if (!db || !auth) return
 
-    let cancelled = false
-    const moodEmojiMap = {
-      Angry: '😠', Sad: '😢', Calm: '😌', Happy: '😊', Excited: '🤩', Exited: '🤩'
-    }
+    // let cancelled = false
+    // const moodEmojiMap = {
+    //   Angry: '../assets/emoji/angri.PNG', Bad: '../assets/emoji/uhhh.PNG', Calm: '../assets/emoji/meh.PNG', Happy: '../assets/emoji/happi.PNG', Excited: '../assets/emoji/excited.PNG'
+    // }
 
     const loadLabels = async () => {
       try {
@@ -483,6 +486,15 @@ function Calendar() {
     return notes[getDayKey(day)] || []
   }
 
+  const formatDateKey = (dateKey) => {
+    if (!dateKey) return ''
+    const parts = String(dateKey).split('-').map(part => Number(part))
+    if (parts.length !== 3 || parts.some(n => Number.isNaN(n))) return dateKey
+    const [year, month, day] = parts
+    const date = new Date(year, month - 1, day)
+    return `${monthNames[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}`
+  }
+
   const canSaveNote = () => {
     if (noteType === 'todo') return noteName.trim() !== ''
     if (noteType === 'note') return noteName.trim() !== '' && selectedTag !== null
@@ -554,6 +566,23 @@ function Calendar() {
       return
     }
     navigate(`/calendar/toDoList?todoId=${result.id}`)
+  }
+
+  const YEAR_RANGE = Array.from({ length: 21 }, (_, i) => 2020 + i) // 2020–2040
+
+  const EMOJI_EFFECTS = {
+    'Angry':   { particles: ['🔥', '🔥', '🔥', '💥'], label: 'Angry' },
+    'Bad':     { particles: ['💩', '💩', '💩'],        label: 'Bad' },
+    'Calm':    { particles: [],                         label: 'Calm' },
+    'Happy':   { particles: ['🩷', '🩷', '💗', '💕'], label: 'Happy' },
+    'Excited': { particles: ['⭐', '✨', '🌟', '💫'], label: 'Excited' }
+  }
+
+  const triggerEmojiEffect = (emotionId, label) => {
+    const effect = EMOJI_EFFECTS[label]
+    if (!effect || effect.particles.length === 0) return
+    setEmojiEffect({ id: emotionId, particles: effect.particles })
+    setTimeout(() => setEmojiEffect(null), 900)
   }
 
   return (
@@ -670,7 +699,99 @@ function Calendar() {
               <span className="calendar-customize-label">Customize</span>
             </button>
           </div>
-          <h2 className="calendar-year">{displayYear}</h2>
+          <div style={{ position: 'relative', display: 'inline-block' }}>
+            <h2
+              className="calendar-year"
+              onClick={() => setShowYearPicker(p => !p)}
+              title="Edit year"
+              style={{ cursor: 'pointer', userSelect: 'none', position: 'relative' }}
+              onMouseEnter={e => {
+                const tip = e.currentTarget.querySelector('.year-tooltip')
+                if (tip) tip.style.opacity = '1'
+              }}
+              onMouseLeave={e => {
+                const tip = e.currentTarget.querySelector('.year-tooltip')
+                if (tip) tip.style.opacity = '0'
+              }}
+            >
+              {displayYear}
+              <span
+                className="year-tooltip"
+                style={{
+                  position: 'absolute',
+                  bottom: 'calc(100% + 4px)',
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  background: 'rgba(40,40,40,0.82)',
+                  color: '#fff',
+                  fontSize: '11px',
+                  padding: '3px 8px',
+                  borderRadius: '6px',
+                  whiteSpace: 'nowrap',
+                  pointerEvents: 'none',
+                  opacity: 0,
+                  transition: 'opacity 0.15s',
+                  fontWeight: 400,
+                }}
+              >Edit year</span>
+            </h2>
+
+            {showYearPicker && (
+              <>
+                <div
+                  style={{ position: 'fixed', inset: 0, zIndex: 199 }}
+                  onClick={() => setShowYearPicker(false)}
+                  aria-hidden
+                />
+                <div style={{
+                  position: 'absolute',
+                  top: 'calc(100% + 6px)',
+                  right: 0,
+                  zIndex: 200,
+                  background: '#fff',
+                  border: '1.5px solid #e8e8e8',
+                  borderRadius: '14px',
+                  boxShadow: '0 8px 28px rgba(0,0,0,0.13)',
+                  padding: '10px 8px',
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(3, 1fr)',
+                  gap: '4px',
+                  minWidth: '168px',
+                }}>
+                  {YEAR_RANGE.map(year => {
+                    const adYear = year - 543 // convert display (พ.ศ.) back to ค.ศ. for comparison
+                    const isSelected = currentDate.getFullYear() === adYear
+                    return (
+                      <button
+                        key={year}
+                        type="button"
+                        onClick={() => {
+                          setCurrentDate(prev => new Date(adYear, prev.getMonth(), 1))
+                          setShowYearPicker(false)
+                        }}
+                        style={{
+                          padding: '6px 4px',
+                          border: isSelected ? '2px solid #222' : '1.5px solid transparent',
+                          borderRadius: '8px',
+                          background: isSelected ? '#222' : 'transparent',
+                          color: isSelected ? '#fff' : '#333',
+                          fontWeight: isSelected ? 700 : 400,
+                          fontSize: '13px',
+                          cursor: 'pointer',
+                          textAlign: 'center',
+                          transition: 'background 0.13s, border-color 0.13s',
+                        }}
+                        onMouseEnter={e => { if (!isSelected) { e.currentTarget.style.background = '#f2f2f2' } }}
+                        onMouseLeave={e => { if (!isSelected) { e.currentTarget.style.background = 'transparent' } }}
+                      >
+                        {year}
+                      </button>
+                    )
+                  })}
+                </div>
+              </>
+            )}
+          </div>
 
           {/* Theme Popover */}
           {isThemePickerOpen && (
@@ -741,16 +862,57 @@ function Calendar() {
                 </div>
 
                 {/* Emotion Selector */}
-                <div className="emotion-selector">
+                <div className="emotion-selector" style={{ position: 'relative' }}>
+                  {/* Particle effect layer */}
+                  {emojiEffect && (
+                    <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 10, overflow: 'visible' }}>
+                      {emojiEffect.particles.map((p, i) => {
+                        const angle = (360 / emojiEffect.particles.length) * i - 90
+                        const rad = angle * Math.PI / 180
+                        const tx = Math.cos(rad) * 70
+                        const ty = Math.sin(rad) * 70
+                        return (
+                          <span
+                            key={i}
+                            style={{
+                              position: 'absolute',
+                              left: '50%',
+                              top: '50%',
+                              fontSize: '40px',
+                              lineHeight: 1,
+                              display: 'inline-block',
+                              transform: 'translate(-50%, -50%)',
+                              animation: `emojiPop 0.75s ease-out forwards`,
+                              animationDelay: `${i * 40}ms`,
+                              '--tx': `${tx}px`,
+                              '--ty': `${ty}px`,
+                            }}
+                          >{p}</span>
+                        )
+                      })}
+                    </div>
+                  )}
+                  <style>{`
+                    @keyframes emojiPop {
+                      0%   { opacity: 1; transform: translate(-50%, -50%) scale(0.4); }
+                      40%  { opacity: 1; transform: translate(calc(-50% + var(--tx)), calc(-50% + var(--ty))) scale(1.2); }
+                      100% { opacity: 0; transform: translate(calc(-50% + var(--tx) * 1.6), calc(-50% + var(--ty) * 1.6)) scale(0.7); }
+                    }
+                  `}</style>
+
                   {emotions.map(emotion => (
                     <button
                       key={emotion.id}
                       className={`emotion-btn${selectedEmotion === emotion.id ? ' emotion-btn--selected' : ''}`}
-                      onClick={() => setSelectedEmotion(emotion.id)}
+                      onClick={() => {
+                        setSelectedEmotion(emotion.id)
+                        triggerEmojiEffect(emotion.id, emotion.label)
+                      }}
                       aria-label={emotion.label}
                       title={emotion.label}
+                      style={{ width: '60px', height: '60px', fontSize: '40px' }}
                     >
-                      <span className="emotion-emoji">{emotion.emoji}</span>
+                      <EmojiRenderer emoji={emotion.emoji} label={emotion.label} className="emotion-emoji" />
                     </button>
                   ))}
                 </div>
@@ -778,7 +940,13 @@ function Calendar() {
                         <div className="note-name">{note.name}</div>
                         <div className="note-meta">
                           {note.type === 'todo' ? 'To-do List' : note.tag?.name}
-                          {note.emotion && ` • ${emotions.find(e => e.id === note.emotion)?.emoji}`}
+                          {(note.date || note.dateKey) && (
+                            <> {' • '} {formatDateKey(note.date || note.dateKey)} </>
+                          )}
+                          {note.emotion && <>
+                            {' • '}
+                            <EmojiRenderer emoji={emotions.find(e => e.id === note.emotion)?.emoji || ''} className="emotion-inline" />
+                          </>}
                         </div>
                       </div>
                       <button
