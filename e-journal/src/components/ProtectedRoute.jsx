@@ -9,6 +9,10 @@ function ProtectedRoute({ children }) {
   const location = useLocation()
 
   useEffect(() => {
+    if (!auth) {
+      setAuthReady(true)
+      return
+    }
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
       setUser(firebaseUser)
       setAuthReady(true)
